@@ -4,13 +4,10 @@ Provider-agnostic AI productivity features for CiviCRM. Flagship feature:
 **natural-language → SearchKit search** with display-intent detection and iterative
 refinement.
 
-> Status: **alpha prototype**. The design rationale lives in
-> `../docs/ai-assistant-extension-design.md`.
-
 ## What it does
 
 - `Ai.prompt` (APIv4) — the reusable LLM primitive every feature builds on.
-- `Ai.searchKit` (APIv4) — turns a request like *"lapsed California donors over $100"* into
+- `Ai.searchKit` (APIv4) — turns a request like _"lapsed United Kingdom donors over $100"_ into
   a transient SearchKit query + a display spec, runs a permission-checked preview, and lets
   you refine it conversationally. Nothing is saved unless you choose to.
 
@@ -24,14 +21,14 @@ Configure at **Administer → Customize Data and Screens → AI Assistant Settin
 (`civicrm/admin/settings/ai-assistant`) — a metadata-driven page grouped into Provider,
 Privacy & PII, and Limits sections. Or set values via the `Setting` API:
 
-| Setting | Default |
-|---|---|
+| Setting                | Default                        |
+| ---------------------- | ------------------------------ |
 | `ai_provider_base_url` | `https://openrouter.ai/api/v1` |
-| `ai_model` | a `:free` OpenRouter slug |
-| `ai_api_key` | _(you supply)_ |
-| `ai_redact_pii` | `TRUE` |
-| `ai_log_prompts` | `FALSE` |
-| `ai_preview_limit` | `25` |
+| `ai_model`             | a `:free` OpenRouter slug      |
+| `ai_api_key`           | _(you supply)_                 |
+| `ai_redact_pii`        | `TRUE`                         |
+| `ai_log_prompts`       | `FALSE`                        |
+| `ai_preview_limit`     | `25`                           |
 
 ## PII posture (read this)
 
@@ -40,13 +37,13 @@ Privacy & PII, and Limits sections. Or set values via the `Setting` API:
   **local model**. The default free tier is cloud and may log prompts — treat it as
   evaluation/low-sensitivity only.
 - `Redactor` masks structured identifiers (emails/phones) best-effort; it cannot catch plain
-  names. See §7 of the design doc.
+  names.
 
 ## Usage example
 
 ```php
 $result = \Civi\Api4\Ai::searchKit()
-  ->setPrompt('how many donors in California gave more than $100 last year')
+  ->setPrompt('how many donors in the United Kingdom gave more than £100 last year')
   ->execute()
   ->first();
 // $result['display']['type']  => 'single'  (a count -> one number)
@@ -61,7 +58,7 @@ Refine the same draft:
   ->setPrompt('actually list them with their email, sorted by amount')
   ->setApiParams($result['api_params'])
   ->setDisplay($result['display'])
-  ->setMessages([['role' => 'user', 'content' => 'how many donors in California ...']])
+  ->setMessages([['role' => 'user', 'content' => 'how many donors in the United Kingdom...']])
   ->execute();
 // display flips from 'single' to 'table'
 ```
@@ -71,24 +68,12 @@ Refine the same draft:
 ```bash
 cv ext:enable ai_assistant
 cv api4 Setting.set +v ai_api_key=YOUR_OPENROUTER_KEY
-cv api4 Ai.searchKit +v prompt='active members in New York'
+cv api4 Ai.searchKit +v prompt='active members in Exeter'
 ```
-
-## Status
-
-Scaffolded with `civix` (boilerplate in `ai_assistant.civix.php` is civix-generated — don't
-hand-edit). The settings page exists (metadata-driven `CRM_Admin_Form_Generic`). The
-remaining UI to build is the **AngularJS search/refine widget** at `civicrm/ai-search`
-(see design doc §6); its nav link is intentionally omitted until that page exists.
 
 ## Layout
 
 ```
-info.xml                                  manifest
-ai_assistant.php                          hooks (container, permission, nav)
-xml/Menu/ai_assistant.xml                 settings page route
-settings/ai_assistant.setting.php         provider/privacy settings (tagged to the page)
-CRM/AiAssistant/Form/Settings.php         admin settings page (metadata-driven)
 Civi/Api4/Ai.php                          APIv4 entity
 Civi/Api4/Action/Ai/Prompt.php            generic completion
 Civi/Api4/Action/Ai/SearchKit.php         NL -> query + display + preview
