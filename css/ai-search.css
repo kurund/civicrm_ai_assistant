@@ -1,0 +1,70 @@
+/* AI Search page */
+#ai-search-app .ai-search-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 1em 0;
+}
+#ai-search-app .ai-search-bar #ai-prompt {
+  flex: 1 1 360px;
+  min-width: 240px;
+}
+#ai-search-app .ai-status {
+  align-self: center;
+  font-style: italic;
+  color: #6b7280;
+}
+#ai-search-app .ai-summary {
+  margin: 0.5em 0;
+  font-weight: 600;
+}
+#ai-search-app .ai-results {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+#ai-search-app .ai-single {
+  font-size: 2.5em;
+  font-weight: 700;
+  padding: 0.4em 0;
+}
+#ai-search-app table.ai-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+#ai-search-app table.ai-table th,
+#ai-search-app table.ai-table td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+#ai-search-app table.ai-table thead th {
+  background: #f3f4f6;
+}
+#ai-search-app .ai-empty {
+  color: #6b7280;
+  font-style: italic;
+}
+#ai-search-app .ai-refine-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 1em 0;
+  padding-top: 1em;
+  border-top: 1px solid #e5e7eb;
+}
+#ai-search-app .ai-refine-wrap #ai-refine {
+  flex: 1 1 360px;
+  min-width: 240px;
+}
+#ai-search-app .ai-json {
+  margin-top: 1em;
+}
+#ai-search-app .ai-json pre {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  padding: 10px;
+  overflow-x: auto;
+}

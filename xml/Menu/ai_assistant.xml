@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<menu>
+  <item>
+    <path>civicrm/admin/settings/ai-assistant</path>
+    <page_callback>CRM_AiAssistant_Form_Settings</page_callback>
+    <title>AI Assistant Settings</title>
+    <access_arguments>administer ai assistant</access_arguments>
+    <adminGroup>Customize Data and Screens</adminGroup>
+    <weight>10</weight>
+  </item>
+  <item>
+    <path>civicrm/ai-search</path>
+    <page_callback>CRM_AiAssistant_Page_Search</page_callback>
+    <title>AI Search</title>
+    <access_arguments>use ai assistant</access_arguments>
+  </item>
+</menu>
