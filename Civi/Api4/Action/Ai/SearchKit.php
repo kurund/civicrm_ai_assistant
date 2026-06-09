@@ -2,6 +2,7 @@
 
 namespace Civi\Api4\Action\Ai;
 
+use Civi\AiAssistant\EntityRouter;
 use Civi\AiAssistant\SchemaContext;
 use Civi\Api4\Generic\AbstractAction;
 use Civi\Api4\Generic\Result;
@@ -38,7 +39,8 @@ class SearchKit extends AbstractAction {
   protected string $prompt = '';
 
   /**
-   * Target entity. Defaults to Contact.
+   * Target entity. Optional override; when NULL it is auto-detected from the
+   * prompt (EntityRouter), defaulting to Contact.
    * @var string|null
    */
   protected ?string $entity = NULL;
@@ -75,7 +77,10 @@ class SearchKit extends AbstractAction {
       throw new \CRM_Core_Exception('Ai.searchKit requires a prompt.');
     }
 
-    $entity = $this->entity ?: 'Contact';
+    /** @var \Civi\AiAssistant\LlmService $llm */
+    $llm = \Civi::service('ai.llm');
+
+    $entity = $this->resolveEntity($llm);
     if (!SchemaContext::isAllowed($entity)) {
       throw new \CRM_Core_Exception("Entity not permitted for AI search: {$entity}");
     }
@@ -83,8 +88,6 @@ class SearchKit extends AbstractAction {
     $system = $this->buildSystemPrompt($entity);
     $messages = $this->buildMessages();
 
-    /** @var \Civi\AiAssistant\LlmService $llm */
-    $llm = \Civi::service('ai.llm');
     $decoded = $llm->completeJson($system, $messages, ['temperature' => 0.1]);
 
     // 1. Normalize shape (strip bad aliases, fix orderBy form, cap limit).
@@ -172,6 +175,46 @@ TXT;
     }
     $messages[] = ['role' => 'user', 'content' => $this->prompt];
     return $messages;
+  }
+
+  /**
+   * Decide which entity to query. An explicit, permitted `entity` always wins
+   * (the UI passes the locked entity back when refining). Otherwise, for a fresh
+   * request, auto-detect it from the prompt; refinements default to the base
+   * entity since routing on a "tweak" instruction is unreliable.
+   */
+  private function resolveEntity(\Civi\AiAssistant\LlmService $llm): string {
+    if ($this->entity && SchemaContext::isAllowed($this->entity)) {
+      return $this->entity;
+    }
+    if (!empty($this->apiParams)) {
+      return 'Contact';
+    }
+    return EntityRouter::detect(
+      $this->prompt,
+      fn(string $prompt): string => $this->classifyEntity($llm, $prompt)
+    );
+  }
+
+  /**
+   * Ask the model which entity the request targets, before building the real
+   * query — a cheap call that tolerates typos and informal wording. Best-effort:
+   * any failure returns '' so EntityRouter falls back to keyword routing.
+   */
+  private function classifyEntity(\Civi\AiAssistant\LlmService $llm, string $prompt): string {
+    $list = implode(', ', SchemaContext::$allowedEntities);
+    $catalog = SchemaContext::catalogBlock();
+    $system = "You route a CiviCRM search request to the single entity whose own records best answer it. "
+      . "The request may contain typos, abbreviations or informal wording — infer intent. "
+      . "Prefer Contact unless the request is fundamentally about another entity's records or aggregates. "
+      . "Reply with ONLY JSON: {\"entity\": \"<one of: {$list}>\"}.\n\nEntities:\n{$catalog}";
+    try {
+      $decoded = $llm->completeJson($system, [['role' => 'user', 'content' => $prompt]], ['temperature' => 0]);
+      return (string) ($decoded['entity'] ?? '');
+    }
+    catch (\Throwable $e) {
+      return '';
+    }
   }
 
   /**

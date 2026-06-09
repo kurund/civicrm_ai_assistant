@@ -27,8 +27,41 @@ class SchemaContext {
     'Email',
   ];
 
+  /**
+   * One-line description of each allowed entity, used to help the model pick a
+   * base entity when a prompt's keyword signals are ambiguous (EntityRouter).
+   *
+   * @var array<string,string>
+   */
+  public static array $entityCatalog = [
+    'Contact' => 'People and organisations — donors, members, supporters — and their core fields.',
+    'Contribution' => 'Donations and payments: amount, date, financial type, payment/contribution status.',
+    'Membership' => 'Memberships: type, status, join/start/end dates, renewals.',
+    'Participant' => 'Event registrations: who registered, status, role, fee.',
+    'Event' => 'Events themselves: title, type, start/end dates, location.',
+    'Activity' => 'Logged activities: meetings, phone calls, emails sent, tasks.',
+    'Email' => 'Email address records: address, on-hold/bounce status, primary flag.',
+  ];
+
   public static function isAllowed(string $entity): bool {
     return in_array($entity, self::$allowedEntities, TRUE);
+  }
+
+  /**
+   * A compact catalog block ("- Entity: description") for a prompt, optionally
+   * limited to a subset of entities.
+   *
+   * @param string[] $only  Restrict to these entities (empty = all allowed).
+   */
+  public static function catalogBlock(array $only = []): string {
+    $lines = [];
+    foreach (self::$entityCatalog as $entity => $desc) {
+      if (!self::isAllowed($entity) || ($only && !in_array($entity, $only, TRUE))) {
+        continue;
+      }
+      $lines[] = "- {$entity}: {$desc}";
+    }
+    return implode("\n", $lines);
   }
 
   /**

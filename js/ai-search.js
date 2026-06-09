@@ -4,8 +4,7 @@
   "use strict";
 
   $(function () {
-    var $entity = $("#ai-entity"),
-      $prompt = $("#ai-prompt"),
+    var $prompt = $("#ai-prompt"),
       $run = $("#ai-run"),
       $status = $("#ai-status"),
       $summary = $("#ai-summary"),
@@ -16,13 +15,23 @@
       $save = $("#ai-save"),
       $json = $("#ai-json");
 
-    // Transient draft state — never written to the database here.
+    // Transient draft state — never written to the database here. The entity is
+    // auto-detected server-side from the first prompt (no drop-down), then locked
+    // for refinements of the same draft.
     var state = {
-      entity: "Contact",
+      entity: null,
       apiParams: null,
       display: null,
       messages: [],
     };
+
+    function reset() {
+      state = { entity: null, apiParams: null, display: null, messages: [] };
+      $results.empty();
+      $summary.empty();
+      $refineWrap.hide();
+      $json.hide();
+    }
 
     function setBusy(busy, msg) {
       $status.text(msg || "");
@@ -56,7 +65,13 @@
     }
 
     function render(r) {
-      $summary.text(r.summary || "");
+      $summary.empty();
+      if (r.api_entity) {
+        $summary.append(
+          $('<span class="ai-entity-badge">').text(r.api_entity),
+        );
+      }
+      $summary.append(document.createTextNode(r.summary || ""));
       if (r.warning) {
         CRM.alert(r.warning, ts("Preview"), "warning");
       }
@@ -115,6 +130,8 @@
       }).then(
         function (rows) {
           var r = rows[0] || {};
+          // Lock the auto-detected entity so refinements stay on the same draft.
+          state.entity = r.api_entity || state.entity;
           state.apiParams = r.api_params || null;
           state.display = r.display || null;
           state.messages.push({ role: "user", content: promptText });
@@ -133,21 +150,10 @@
       );
     }
 
-    $entity.on("change", function () {
-      // Switching entity starts a fresh draft.
-      state = {
-        entity: $(this).val(),
-        apiParams: null,
-        display: null,
-        messages: [],
-      };
-      $results.empty();
-      $summary.empty();
-      $refineWrap.hide();
-      $json.hide();
-    });
-
+    // A top-level search always starts a fresh draft (re-detecting the entity);
+    // "Refine" continues the current draft.
     $run.on("click", function () {
+      reset();
       ask($.trim($prompt.val()));
     });
     $refineRun.on("click", function () {

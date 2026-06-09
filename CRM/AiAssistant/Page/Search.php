@@ -17,9 +17,7 @@ class CRM_AiAssistant_Page_Search extends CRM_Core_Page {
     Civi::resources()->addScriptFile('ai_assistant', 'js/ai-search.js');
     Civi::resources()->addStyleFile('ai_assistant', 'css/ai-search.css');
 
-    // Entities the assistant may target (drop-down options).
-    $this->assign('entities', \Civi\AiAssistant\SchemaContext::$allowedEntities);
-
+    // No entity picker: Ai.searchKit auto-detects the entity from the prompt.
     parent::run();
   }
 

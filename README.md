@@ -10,6 +10,12 @@ refinement.
 - `Ai.searchKit` (APIv4) — turns a request like _"lapsed United Kingdom donors over $100"_ into
   a transient SearchKit query + a display spec, runs a permission-checked preview, and lets
   you refine it conversationally. Nothing is saved unless you choose to.
+- **Entity auto-detection** — The target entity (Contact, Contribution, Membership, …)
+  is inferred from the prompt by a small, dedicated LLM
+  classification call that tolerates typos and informal wording, before the query is built.
+  A deterministic keyword router is the offline fallback, and Contact is the safe default.
+  The detected entity is shown as a badge and locked while you refine the same draft. Pass
+  `entity` explicitly to override.
 
 ## Provider configuration
 
@@ -80,7 +86,8 @@ Civi/Api4/Action/Ai/SearchKit.php         NL -> query + display + preview
 Civi/AiAssistant/LlmService.php           assembly, redaction, logging
 Civi/AiAssistant/Provider/*               OpenAI-compatible transport
 Civi/AiAssistant/Redactor.php             best-effort PII masking
-Civi/AiAssistant/SchemaContext.php        schema-grounding (no records)
+Civi/AiAssistant/SchemaContext.php        schema-grounding + entity catalog (no records)
+Civi/AiAssistant/EntityRouter.php         prompt -> entity routing (LLM-first, keyword fallback)
 Civi/AiAssistant/QueryNormalizer.php      deterministic shape repair (pure)
 Civi/AiAssistant/QueryValidator.php       schema-driven field validation (getFields)
 ```

@@ -8,12 +8,7 @@
   </div>
 
   <div class="ai-search-bar">
-    <label for="ai-entity">{ts}Search{/ts}</label>
-    <select id="ai-entity" class="crm-form-select">
-      {foreach from=$entities item=ent}
-        <option value="{$ent}">{$ent}</option>
-      {/foreach}
-    </select>
+    <label for="ai-prompt" class="ai-sr-only">{ts}Search{/ts}</label>
     <textarea id="ai-prompt" class="crm-form-textarea" rows="2"
       placeholder="{ts escape='html'}Ask in plain language…{/ts}"></textarea>
     <button id="ai-run" class="crm-button">{ts}Search{/ts}</button>
