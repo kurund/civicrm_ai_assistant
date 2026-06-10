@@ -68,19 +68,75 @@ class LlmService {
   }
 
   /**
-   * Pull the first JSON object out of a string.
+   * Pull the first JSON object out of a model response, tolerating the ways
+   * local/instruct models dress it up: a <think>...</think> reasoning preamble,
+   * ```json ... ``` fences, or trailing commentary.
    */
   public static function extractJson(string $raw): ?array {
     $raw = trim($raw);
-    $decoded = json_decode($raw, TRUE);
+
+    // Drop a leading reasoning block some local models emit before the answer.
+    $raw = preg_replace('#<think\b[^>]*>.*?</think>#is', '', $raw) ?? $raw;
+
+    // Prefer the contents of a fenced code block if present.
+    if (preg_match('/```(?:json)?\s*(.+?)```/is', $raw, $m)) {
+      $raw = trim($m[1]);
+    }
+
+    // Fast path: the whole (cleaned) string is JSON.
+    $decoded = json_decode(trim($raw), TRUE);
     if (is_array($decoded)) {
       return $decoded;
     }
-    // Strip ```json ... ``` fences or surrounding prose.
-    if (preg_match('/\{.*\}/s', $raw, $m)) {
-      $decoded = json_decode($m[0], TRUE);
+
+    // Otherwise extract the first balanced { ... } object, ignoring braces that
+    // occur inside string literals (greedy first-to-last matching breaks when
+    // the response contains more than one object or stray braces in prose).
+    $candidate = self::firstJsonObject($raw);
+    if ($candidate !== NULL) {
+      $decoded = json_decode($candidate, TRUE);
       if (is_array($decoded)) {
         return $decoded;
+      }
+    }
+    return NULL;
+  }
+
+  /**
+   * Return the first brace-balanced {...} substring, or NULL. String-literal
+   * aware, so a "}" inside a value does not close the object prematurely.
+   */
+  private static function firstJsonObject(string $s): ?string {
+    $start = strpos($s, '{');
+    if ($start === FALSE) {
+      return NULL;
+    }
+    $depth = 0;
+    $inString = FALSE;
+    $escaped = FALSE;
+    $len = strlen($s);
+    for ($i = $start; $i < $len; $i++) {
+      $ch = $s[$i];
+      if ($inString) {
+        if ($escaped) {
+          $escaped = FALSE;
+        }
+        elseif ($ch === '\\') {
+          $escaped = TRUE;
+        }
+        elseif ($ch === '"') {
+          $inString = FALSE;
+        }
+        continue;
+      }
+      if ($ch === '"') {
+        $inString = TRUE;
+      }
+      elseif ($ch === '{') {
+        $depth++;
+      }
+      elseif ($ch === '}' && --$depth === 0) {
+        return substr($s, $start, $i - $start + 1);
       }
     }
     return NULL;

@@ -33,4 +33,27 @@ class LlmServiceTest extends TestCase {
     $this->assertNull(LlmService::extractJson('no json here at all'));
   }
 
+  public function testStripsThinkBlock(): void {
+    // Reasoning models emit <think>…</think> (which itself may contain braces)
+    // before the real answer.
+    $raw = "<think>The user wants {a count}. I'll use COUNT.</think>\n{\"type\":\"single\"}";
+    $out = LlmService::extractJson($raw);
+    $this->assertSame('single', $out['type']);
+  }
+
+  public function testExtractsBalancedObjectWithTrailingProse(): void {
+    // A nested object plus commentary after the close — greedy matching would
+    // have swallowed the trailing "}" in prose; balanced extraction stops dead.
+    $raw = 'Here: {"display":{"type":"table"},"limit":10} — hope that helps! }';
+    $out = LlmService::extractJson($raw);
+    $this->assertSame(['type' => 'table'], $out['display']);
+    $this->assertSame(10, $out['limit']);
+  }
+
+  public function testIgnoresBraceInsideStringValue(): void {
+    $out = LlmService::extractJson('{"summary":"contacts with a } brace","limit":5}');
+    $this->assertSame('contacts with a } brace', $out['summary']);
+    $this->assertSame(5, $out['limit']);
+  }
+
 }

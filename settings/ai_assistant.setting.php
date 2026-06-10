@@ -102,4 +102,13 @@ return [
     'description' => E::ts('Maximum rows fetched when previewing a generated search.'),
     'help_text' => NULL,
   ],
+  'ai_max_tokens' => $group + $page('limits', 20) + [
+    'name' => 'ai_max_tokens',
+    'type' => 'Integer',
+    'html_type' => 'number',
+    'default' => 1024,
+    'title' => E::ts('Max response tokens'),
+    'description' => E::ts('Upper bound on tokens the model may generate per call. Raise it if generated queries look truncated (common with local models, whose default output budget is small); lower it to cap cost.'),
+    'help_text' => NULL,
+  ],
 ];

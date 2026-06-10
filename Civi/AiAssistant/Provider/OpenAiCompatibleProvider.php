@@ -16,6 +16,7 @@ class OpenAiCompatibleProvider implements ProviderInterface {
     $modelSetting = $options['model'] ?? (string) \Civi::settings()->get('ai_model');
     $apiKey = (string) \Civi::settings()->get('ai_api_key');
     $timeout = (int) (\Civi::settings()->get('ai_request_timeout') ?: 60);
+    $maxTokens = (int) ($options['max_tokens'] ?? (\Civi::settings()->get('ai_max_tokens') ?: 1024));
 
     if ($baseUrl === '' || trim($modelSetting) === '') {
       throw new \CRM_Core_Exception('AI Assistant is not configured: set the provider base URL and model.');
@@ -31,6 +32,12 @@ class OpenAiCompatibleProvider implements ProviderInterface {
       'messages' => array_values($messages),
       'temperature' => $options['temperature'] ?? 0.2,
     ];
+    // Cap (and reserve) output length. The standard OpenAI field; Ollama's
+    // OpenAI-compatible layer maps it to num_predict, so a long JSON query is
+    // not truncated mid-object (its default predict budget is small).
+    if ($maxTokens > 0) {
+      $payload['max_tokens'] = $maxTokens;
+    }
     if (count($models) > 1) {
       $payload['models'] = $models;
     }
