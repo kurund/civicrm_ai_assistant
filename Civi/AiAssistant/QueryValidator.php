@@ -71,6 +71,21 @@ class QueryValidator {
   }
 
   /**
+   * An alias derived from $alias that does not collide with any real field name
+   * on the entity (e.g. "total_amount" -> "total_amount_calc").
+   *
+   * @param array<string,array> $names  Field metadata keyed by field name.
+   */
+  private static function nonCollidingAlias(string $alias, array $names): string {
+    $candidate = $alias . '_calc';
+    $i = 2;
+    while (isset($names[$candidate])) {
+      $candidate = $alias . '_calc_' . $i++;
+    }
+    return $candidate;
+  }
+
+  /**
    * Validate & repair api_params. Returns ['params' => array, 'issues' => string[]].
    */
   public static function validate(string $entity, array $params): array {
@@ -79,6 +94,8 @@ class QueryValidator {
       // Could not load metadata; skip rather than risk mangling a valid query.
       return ['params' => $params, 'issues' => $issues];
     }
+
+    $names = self::fieldNames($entity);
 
     // SELECT — keep "*", and any item whose underlying field resolves.
     if (!empty($params['select']) && is_array($params['select'])) {
@@ -95,10 +112,32 @@ class QueryValidator {
       $params['select'] = $kept ?: ['id'];
     }
 
-    // Aliases produced by select are valid orderBy/having references.
+    // An expression alias that equals a real field name is rejected by APIv4
+    // ("Cannot use existing field name as alias", e.g. SUM(total_amount) AS
+    // total_amount). Rename it deterministically; remember the mapping so
+    // orderBy references to the old alias follow.
+    $renamed = [];
+    foreach (($params['select'] ?? []) as $i => $sel) {
+      $alias = QueryNormalizer::selectAlias($sel);
+      if ($alias !== NULL && isset($names[$alias])) {
+        $new = self::nonCollidingAlias($alias, $names);
+        $renamed[$alias] = $new;
+        $params['select'][$i] = QueryNormalizer::renameAlias($sel, $new);
+        $issues[] = "Renamed alias '{$alias}' to '{$new}' (collided with a field name)";
+      }
+    }
+
+    // Aliases produced by select are valid orderBy/having references. Also map
+    // each alias to its underlying expression, since APIv4 will not order by a
+    // bare alias — orderBy must reference the expression (e.g. SUM(total_amount)).
     $aliases = [];
+    $aliasExpr = [];
     foreach ($params['select'] ?? [] as $sel) {
       $aliases[QueryNormalizer::selectResultKey($sel)] = TRUE;
+      $alias = QueryNormalizer::selectAlias($sel);
+      if ($alias !== NULL) {
+        $aliasExpr[$alias] = QueryNormalizer::stripAlias($sel);
+      }
     }
 
     // WHERE — drop malformed clauses, bad operators, unknown fields.
@@ -147,11 +186,26 @@ class QueryValidator {
       }
     }
 
+    // When the select aggregates, every non-aggregated selected field must be
+    // grouped or MySQL errors (ONLY_FULL_GROUP_BY). Models routinely group by
+    // only the "main" field (e.g. contact_id) and omit the rest — add them.
+    $required = QueryNormalizer::requiredGroupBy($params['select'] ?? []);
+    if ($required) {
+      $existing = $params['groupBy'] ?? [];
+      $params['groupBy'] = array_values(array_unique(array_merge($existing, $required)));
+    }
+
     // ORDER BY (already a {field: dir} map) — allow aliases or real fields.
     if (!empty($params['orderBy']) && is_array($params['orderBy'])) {
       $kept = [];
       foreach ($params['orderBy'] as $field => $dir) {
-        if (isset($aliases[$field]) || self::fieldExists($entity, (string) $field)) {
+        // Follow a renamed alias (orderBy total_amount -> total_amount_calc).
+        $field = $renamed[$field] ?? $field;
+        // APIv4 rejects ordering by a bare alias; use the underlying expression.
+        if (isset($aliasExpr[$field])) {
+          $kept[$aliasExpr[$field]] = $dir;
+        }
+        elseif (isset($aliases[$field]) || self::fieldExists($entity, (string) $field)) {
           $kept[$field] = $dir;
         }
         else {

@@ -99,10 +99,14 @@ The model proposes; deterministic code disposes. After the LLM returns `api_para
 
 1. **QueryNormalizer** (pure, unit-tested) repairs shape mistakes without touching the DB —
    strips disallowed aliases off plain fields, coerces `orderBy` into APIv4's `{field: dir}`
-   form, caps the limit.
+   form, wraps flat `BETWEEN`/`IN` values into the required nested array, and caps the limit.
 2. **QueryValidator** checks every `select`/`where`/`groupBy`/`orderBy` field reference
-   against the real schema (APIv4 `getFields`, resolving one-level implicit joins) and
-   **drops** anything that doesn't exist, reporting it in `warning`.
+   against the real schema (APIv4 `getFields`, resolving implicit joins) and **drops**
+   anything that doesn't exist, reporting it in `warning`. It also repairs three things APIv4
+   rejects at runtime: an aggregate alias that collides with a real field name (`SUM(total_amount)
+   AS total_amount` → renamed), ordering by a bare alias (rewritten to the underlying
+   expression, e.g. `total` → `SUM(total_amount)`), and incomplete grouping (every
+   non-aggregated selected field is added to `groupBy` for `ONLY_FULL_GROUP_BY`).
 3. The repaired query runs transiently with `checkPermissions = TRUE` for the preview.
 
 So a hallucinated field or malformed clause is removed deterministically rather than failing

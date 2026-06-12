@@ -143,9 +143,11 @@ Return ONLY a JSON object with these keys:
 
 APIv4 syntax rules — follow precisely:
 - "select": array of strings. ONLY function expressions may use "AS alias" — e.g. "COUNT(id) AS cnt", "SUM(total_amount) AS total". NEVER alias a plain field: write "contact_id.display_name", NOT "contact_id.display_name AS donor". When you use an aggregate, every non-aggregated selected field must also appear in groupBy.
+- An alias must NOT be the same as an existing field name. For SUM(total_amount) write "SUM(total_amount) AS total" (or "AS total_sum"), NEVER "AS total_amount".
 - To read a field on a RELATED entity, use the foreign-key field, a dot, then the field: e.g. "contact_id.display_name", NOT "contact.display_name". Only use joins you are confident exist.
+- A contact's email/phone/address are SEPARATE related records, not plain fields. Read the primary one via an implicit join: "contact_id.email_primary.email", "contact_id.phone_primary.phone", "contact_id.address_primary.street_address". There is NO "contact_id.email" or "contact_id.phone" field. (When the base entity IS Contact, drop the "contact_id." prefix: "email_primary.email".)
 - In "display".columns and "orderBy", reference a plain field by its full path (e.g. "contact_id.display_name") and an aggregate by its alias (e.g. "total").
-- "where": array of [field, operator, value]. Operators: "=", "!=", ">", "<", ">=", "<=", "IN", "NOT IN", "LIKE", "IS NULL", "IS NOT NULL", "BETWEEN". For IS NULL / IS NOT NULL omit the value: [field, "IS NOT NULL"].
+- "where": array of [field, operator, value]. Operators: "=", "!=", ">", "<", ">=", "<=", "IN", "NOT IN", "LIKE", "IS NULL", "IS NOT NULL", "BETWEEN". For IS NULL / IS NOT NULL omit the value: [field, "IS NOT NULL"]. For BETWEEN and IN the value is a SINGLE array: ["receive_date", "BETWEEN", ["2026-01-01", "2026-12-31"]], ["status_id", "IN", [1, 2]] — NOT [field, "BETWEEN", lo, hi].
 - "orderBy": an OBJECT mapping a field or select-alias to "ASC" or "DESC". CORRECT: {"total": "DESC"}. WRONG: [["total","DESC"]].
 - "groupBy": array of field names (no aliases).
 - "limit": integer.
@@ -236,6 +238,13 @@ TXT;
       if (!$clean['orderBy']) {
         unset($clean['orderBy']);
       }
+    }
+    if (isset($clean['where']) && is_array($clean['where'])) {
+      // Repair clause shape (e.g. flat BETWEEN/IN -> nested-array value).
+      $clean['where'] = array_values(array_filter(array_map(
+        [\Civi\AiAssistant\QueryNormalizer::class, 'normalizeWhereClause'],
+        $clean['where']
+      )));
     }
     if (isset($clean['where']) && !$clean['where']) {
       unset($clean['where']);
