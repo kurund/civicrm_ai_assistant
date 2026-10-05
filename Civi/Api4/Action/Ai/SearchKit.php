@@ -159,7 +159,7 @@ Explicit joins — use when the request combines records of ANOTHER entity that 
 - "join": array of ["Entity AS alias", "INNER"|"LEFT"|"EXCLUDE", [left, "=", right]]. INNER = must have a matching record, EXCLUDE = must NOT have one, LEFT = optional (to show its fields).
 - Joinable entities: {$joinable}.
 - The ON condition links the two by field names, e.g. ["id", "=", "membership.contact_id"] from Contact, or ["contact_id", "=", "membership.contact_id"] from Contribution.
-- Refer to a joined entity's fields with the alias prefix: "membership.membership_type_id:label", "membership.status_id:name". Put filters on joined fields in "where", not in the ON condition.
+- Refer to a joined entity's fields with the alias prefix: "membership.membership_type_id:label", "membership.status_id:name". Put filters on joined fields in "where", not in the ON condition - including the filters that define what an EXCLUDE join excludes (e.g. "no contribution THIS year": EXCLUDE "Contribution AS this_year" plus a where on this_year.receive_date).
 - Joins repeat the base row once per match, so the result is grouped by the base "id" automatically. Never SUM/COUNT one joined entity while also INNER-joining a different one-to-many entity (the totals get multiplied); use COUNT(DISTINCT alias.id) for counts.
 
 Example (top contributors): {"select":["contact_id.display_name AS donor","SUM(total_amount) AS total"],"groupBy":["contact_id"],"orderBy":{"total":"DESC"},"limit":10}

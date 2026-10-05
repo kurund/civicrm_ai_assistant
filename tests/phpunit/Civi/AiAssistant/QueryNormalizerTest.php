@@ -216,4 +216,15 @@ class QueryNormalizerTest extends TestCase {
     $this->assertFalse(QueryNormalizer::isFieldOperand(5));
   }
 
+  public function testNormalizeJoinKeepsLiteralFlagAndValuelessOperators(): void {
+    $this->assertSame(
+      ['Contribution AS c', 'EXCLUDE', ['id', '=', 'c.contact_id'], ['c.receive_date', 'BETWEEN', ['2026-01-01', '2026-12-31']], ['c.is_test', 'IS NOT NULL']],
+      QueryNormalizer::normalizeJoin(['Contribution AS c', 'EXCLUDE', ['id', '=', 'c.contact_id'], ['c.receive_date', 'between', '2026-01-01', '2026-12-31'], ['c.is_test', 'IS NOT NULL']])
+    );
+    $this->assertSame(
+      ['c.status_id:name', '=', 'Completed', FALSE],
+      QueryNormalizer::normalizeJoin(['Contribution AS c', 'INNER', ['id', '=', 'c.contact_id'], ['c.status_id:name', '=', 'Completed', FALSE]])[3]
+    );
+  }
+
 }

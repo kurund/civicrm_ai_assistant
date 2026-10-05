@@ -104,7 +104,7 @@ The model proposes; deterministic code disposes. After the LLM returns `api_para
    against the real schema (APIv4 `getFields`, resolving implicit joins) and **drops**
    anything that doesn't exist, reporting it in `warning`. It also repairs three things APIv4
    rejects at runtime: an aggregate alias that collides with a real field name (`SUM(total_amount)
-   AS total_amount` → renamed), ordering by a bare alias (rewritten to the underlying
+AS total_amount` → renamed), ordering by a bare alias (rewritten to the underlying
    expression, e.g. `total` → `SUM(total_amount)`), and incomplete grouping (every
    non-aggregated selected field is added to `groupBy` for `ONLY_FULL_GROUP_BY`).
 3. The repaired query runs transiently with `checkPermissions = TRUE` for the preview.

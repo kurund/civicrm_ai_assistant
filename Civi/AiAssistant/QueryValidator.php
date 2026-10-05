@@ -98,8 +98,8 @@ class QueryValidator {
    * conditions must exist. A join that fails any check is dropped (fields that
    * reference its alias are then dropped by the regular field checks).
    *
-   * @return array{0: array[], 1: array<string,string>, 2: string[]}
-   *   [valid joins, alias => entity, issues]
+   * @return array{0: array<string,array>, 1: array<string,string>, 2: string[]}
+   *   [alias => valid join, alias => entity, issues]
    */
   private static function validateJoins(string $entity, $rawJoins): array {
     $joins = [];
@@ -124,20 +124,23 @@ class QueryValidator {
       $known = $aliases + [$alias => $joinEntity];
       $linksJoin = FALSE;
       $valid = TRUE;
-      foreach (array_slice($join, 2) as $cond) {
-        if (!in_array($cond[1], QueryNormalizer::OPERATORS, TRUE)) {
+      foreach ($join as $i => $cond) {
+        if ($i < 2) {
+          continue;
+        }
+        if (!in_array($cond[1], QueryNormalizer::OPERATORS, TRUE) || !self::fieldExists($entity, $cond[0], $known)) {
           $valid = FALSE;
           break;
         }
-        foreach ([$cond[0], $cond[2]] as $operand) {
-          if (!QueryNormalizer::isFieldOperand($operand)) {
-            continue;
-          }
-          if (!self::fieldExists($entity, $operand, $known)) {
-            $valid = FALSE;
-            break 2;
-          }
-          $linksJoin = $linksJoin || str_starts_with($operand, $alias . '.');
+        if (!array_key_exists(2, $cond) || ($cond[3] ?? TRUE) === FALSE) {
+          continue;
+        }
+        if (QueryNormalizer::isFieldOperand($cond[2]) && self::fieldExists($entity, $cond[2], $known)) {
+          $linksJoin = $linksJoin || str_starts_with($cond[0], $alias . '.') || str_starts_with($cond[2], $alias . '.');
+        }
+        else {
+          // APIv4 reads an ON operand as a field unless flagged as a literal.
+          $join[$i][3] = FALSE;
         }
       }
       if (!$valid || !$linksJoin) {
@@ -145,7 +148,7 @@ class QueryValidator {
         continue;
       }
       $aliases[$alias] = $joinEntity;
-      $joins[] = $join;
+      $joins[$alias] = $join;
     }
     return [$joins, $aliases, $issues];
   }
@@ -165,12 +168,6 @@ class QueryValidator {
     // JOIN — must be run before the field checks, which resolve its aliases.
     [$joinClauses, $joins, $joinIssues] = self::validateJoins($entity, $params['join'] ?? []);
     $issues = array_merge($issues, $joinIssues);
-    if ($joinClauses) {
-      $params['join'] = $joinClauses;
-    }
-    else {
-      unset($params['join']);
-    }
 
     // SELECT — keep "*", and any item whose underlying field resolves.
     if (!empty($params['select']) && is_array($params['select'])) {
@@ -232,6 +229,17 @@ class QueryValidator {
           $issues[] = "Dropped where clause on unknown field: {$clause[0]}";
           continue;
         }
+        // EXCLUDE adds "alias.id IS NULL", so a WHERE filter on its fields can
+        // never match; it has to narrow the join's ON instead.
+        $alias = explode('.', (string) $clause[0], 2)[0];
+        if (($joinClauses[$alias][1] ?? NULL) === 'EXCLUDE') {
+          $clause = array_values($clause);
+          if (array_key_exists(2, $clause)) {
+            $clause[3] = FALSE;
+          }
+          $joinClauses[$alias][] = $clause;
+          continue;
+        }
         $kept[] = $clause;
       }
       if ($kept) {
@@ -261,9 +269,13 @@ class QueryValidator {
       }
     }
 
-    // When the select aggregates, every non-aggregated selected field must be
-    // grouped or MySQL errors (ONLY_FULL_GROUP_BY). Models routinely group by
-    // only the "main" field (e.g. contact_id) and omit the rest — add them.
+    if ($joinClauses) {
+      $params['join'] = array_values($joinClauses);
+    }
+    else {
+      unset($params['join']);
+    }
+
     // A join onto a one-to-many entity (a contact's contributions) repeats the
     // base row once per match; group by the base id to keep one row each.
     $fansOut = FALSE;
@@ -273,6 +285,9 @@ class QueryValidator {
     if ($fansOut && empty($params['groupBy'])) {
       $params['groupBy'] = ['id'];
     }
+    // When the select aggregates, every non-aggregated selected field must be
+    // grouped or MySQL errors (ONLY_FULL_GROUP_BY). Models routinely group by
+    // only the "main" field (e.g. contact_id) and omit the rest — add them.
     $required = QueryNormalizer::requiredGroupBy($params['select'] ?? [], !empty($params['groupBy']));
     if ($required) {
       $existing = $params['groupBy'] ?? [];

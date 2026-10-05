@@ -176,11 +176,15 @@ class QueryNormalizer {
     }
     $conditions = [];
     foreach ($rest as $cond) {
-      if (!is_array($cond) || count($cond) < 3 || !is_string($cond[0])) {
+      $clean = is_array($cond) ? self::normalizeWhereClause($cond) : NULL;
+      if ($clean === NULL || !is_string($clean[0])) {
         return NULL;
       }
       $cond = array_values($cond);
-      $conditions[] = [$cond[0], strtoupper(trim((string) $cond[1])), $cond[2]];
+      if (isset($clean[2]) && is_bool($cond[3] ?? NULL)) {
+        $clean[3] = $cond[3];
+      }
+      $conditions[] = $clean;
     }
     if (!$conditions) {
       return NULL;
