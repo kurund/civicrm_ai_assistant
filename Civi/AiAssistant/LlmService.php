@@ -52,17 +52,23 @@ class LlmService {
 
   /**
    * Decode a JSON completion, tolerating models that wrap JSON in prose or
-   * ```json fences.
+   * ```json fences. An unparseable reply is retried once.
    *
    * @return array
    * @throws \CRM_Core_Exception
    */
   public function completeJson(?string $system, array $messages, array $options = []): array {
     $options['json'] = TRUE;
-    $raw = $this->complete($system, $messages, $options);
-    $decoded = self::extractJson($raw);
+    $decoded = self::extractJson($this->complete($system, $messages, $options));
     if ($decoded === NULL) {
-      throw new \CRM_Core_Exception('The AI response could not be parsed as JSON.');
+      $messages[] = [
+        'role' => 'user',
+        'content' => 'Your previous reply was not valid JSON. Reply with ONLY the JSON object, no other text.',
+      ];
+      $decoded = self::extractJson($this->complete($system, $messages, $options));
+    }
+    if ($decoded === NULL) {
+      throw new \CRM_Core_Exception('The AI response could not be read (it was not valid JSON), even after retrying. Please try again.');
     }
     return $decoded;
   }

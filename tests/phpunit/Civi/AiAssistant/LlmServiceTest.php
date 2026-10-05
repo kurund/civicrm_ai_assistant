@@ -56,4 +56,45 @@ class LlmServiceTest extends TestCase {
     $this->assertSame(5, $out['limit']);
   }
 
+  private function fakeLlm(array $replies): LlmService {
+    return new class($replies) extends LlmService {
+
+      public array $calls = [];
+
+      public function __construct(private array $replies) {}
+
+      public function complete(?string $system, array $messages, array $options = []): string {
+        $this->calls[] = $messages;
+        return array_shift($this->replies);
+      }
+
+    };
+  }
+
+  public function testCompleteJsonRetriesOnceAfterUnparseableReply(): void {
+    $llm = $this->fakeLlm(['Sorry, I cannot do {that', '{"ok":true}']);
+    $this->assertSame(['ok' => TRUE], $llm->completeJson('sys', [['role' => 'user', 'content' => 'q']]));
+    $this->assertCount(2, $llm->calls);
+    $this->assertCount(2, $llm->calls[1]);
+    $this->assertStringContainsString('not valid JSON', $llm->calls[1][1]['content']);
+  }
+
+  public function testCompleteJsonDoesNotRetryValidReply(): void {
+    $llm = $this->fakeLlm(['{"ok":true}']);
+    $llm->completeJson('sys', [['role' => 'user', 'content' => 'q']]);
+    $this->assertCount(1, $llm->calls);
+  }
+
+  public function testCompleteJsonGivesUpAfterSecondFailure(): void {
+    $llm = $this->fakeLlm(['nope', 'still nope']);
+    try {
+      $llm->completeJson('sys', [['role' => 'user', 'content' => 'q']]);
+      $this->fail('Expected an exception');
+    }
+    catch (\CRM_Core_Exception $e) {
+      $this->assertStringContainsString('Please try again', $e->getMessage());
+      $this->assertCount(2, $llm->calls);
+    }
+  }
+
 }
