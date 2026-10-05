@@ -16,6 +16,11 @@ refinement.
   A deterministic keyword router is the offline fallback, and Contact is the safe default.
   The detected entity is shown as a badge and locked while you refine the same draft. Pass
   `entity` explicitly to override.
+- **Print and CSV export** - On the AI Search page (`civicrm/ai-search`), **Print** prints
+  the results table without the page chrome, and **Export CSV** downloads the results as a
+  UTF-8 CSV that opens cleanly in Excel. The preview shows up to `ai_preview_limit` rows; when
+  there are more, **Print all** and **Export CSV** fetch every row through the
+  permission-checked API.
 
 ## Provider configuration
 
@@ -95,19 +100,43 @@ Civi/AiAssistant/QueryValidator.php       schema-driven field validation (getFie
 
 ## How a query is made safe
 
-The model proposes; deterministic code disposes. After the LLM returns `api_params`:
+The model proposes; deterministic code disposes. If the model's reply is not valid JSON, the
+request is retried once before an error is shown. After the LLM returns `api_params`:
 
-1. **QueryNormalizer** (pure, unit-tested) repairs shape mistakes without touching the DB -
-   strips disallowed aliases off plain fields, coerces `orderBy` into APIv4's `{field: dir}`
-   form, wraps flat `BETWEEN`/`IN` values into the required nested array, and caps the limit.
+1. **QueryNormalizer** (pure, unit-tested) repairs shape mistakes without touching the DB:
+   - strips disallowed aliases off plain fields;
+   - coerces `orderBy` into APIv4's `{field: dir}` form;
+   - wraps flat `BETWEEN`/`IN` values into the required nested array;
+   - rewrites explicit joins into APIv4's `["Entity AS alias", "INNER"|"LEFT"|"EXCLUDE", [a, "=", b]]`
+     form (object form, lowercase or SQL-style join types, missing alias or join type).
 2. **QueryValidator** checks every `select`/`where`/`groupBy`/`orderBy` field reference
-   against the real schema (APIv4 `getFields`, resolving implicit joins) and **drops**
-   anything that doesn't exist, reporting it in `warning`. It also repairs three things APIv4
-   rejects at runtime: an aggregate alias that collides with a real field name (`SUM(total_amount)
-AS total_amount` → renamed), ordering by a bare alias (rewritten to the underlying
-   expression, e.g. `total` → `SUM(total_amount)`), and incomplete grouping (every
-   non-aggregated selected field is added to `groupBy` for `ONLY_FULL_GROUP_BY`).
-3. The repaired query runs transiently with `checkPermissions = TRUE` for the preview.
+   against the real schema (APIv4 `getFields`) and **drops** anything that doesn't exist,
+   reporting it in `warning`. Implicit joins (`contact_id.display_name`) and explicit join
+   aliases (`membership.status_id:name`) are both resolved. It also:
+   - **Joins:** drops a join onto an entity the assistant may not query, a join whose alias
+     shadows a field, or one whose ON condition references unknown fields. ON operands that
+     are values rather than fields are marked as literals.
+   - **EXCLUDE joins:** moves `where` filters on an EXCLUDE alias into that join's ON
+     condition. APIv4 adds `alias.id IS NULL` for EXCLUDE, so the same filter in `where`
+     could never match (e.g. "donated last year but not this year").
+   - **Duplicate rows:** a join onto a one-to-many entity repeats the base row per match,
+     so a non-aggregate query with such a join is grouped by the base `id`.
+   - **Inflated aggregates:** with two or more one-to-many joins, rows multiply. `COUNT`
+     becomes `COUNT(DISTINCT ...)`, `GROUP_CONCAT` gains `DISTINCT`, `MIN`/`MAX` and `AVG`
+     grouped by the base `id` are kept, and anything that cannot be computed exactly (such as
+     `SUM`) is removed with a warning rather than shown wrong.
+   - **APIv4 runtime errors:** renames an aggregate alias that collides with a field name
+     (`SUM(total_amount) AS total_amount`), rewrites ordering by a bare alias to the
+     underlying expression (`total` → `SUM(total_amount)`), and adds every non-aggregated
+     selected field to `groupBy` for `ONLY_FULL_GROUP_BY`.
+3. The repaired query runs with `checkPermissions = TRUE` for the preview, capped at
+   `ai_preview_limit` rows (`preview_truncated` says whether more exist). `api_params` keeps
+   the model's own limit, so **Print all** and **Export CSV** on the AI Search page fetch
+   every row, still through the permission-checked API.
 
 So a hallucinated field or malformed clause is removed deterministically rather than failing
-the query - the LLM's correctness matters less over time.
+the query, and a number the query cannot compute correctly is never shown.
+
+## Development
+
+Claude Code was also used in developing this extension.
