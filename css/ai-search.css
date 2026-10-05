@@ -91,7 +91,16 @@
 #ai-search-app .ai-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+}
+#ai-search-app .ai-truncated {
+  margin-right: auto;
+  font-style: italic;
+  color: #6b7280;
+}
+#ai-search-app #ai-results-all {
+  display: none;
 }
 
 @media print {
@@ -111,6 +120,12 @@
   }
   #ai-search-app .ai-results {
     overflow: visible;
+  }
+  body.ai-print-all #ai-search-app #ai-results {
+    display: none;
+  }
+  body.ai-print-all #ai-search-app #ai-results-all {
+    display: block;
   }
   #ai-search-app table.ai-table {
     font-size: 10pt;

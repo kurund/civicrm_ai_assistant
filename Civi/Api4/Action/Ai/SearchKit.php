@@ -90,7 +90,7 @@ class SearchKit extends AbstractAction {
 
     $decoded = $llm->completeJson($system, $messages, ['temperature' => 0.1]);
 
-    // 1. Normalize shape (strip bad aliases, fix orderBy form, cap limit).
+    // 1. Normalize shape (strip bad aliases, fix orderBy form, clean limit).
     $apiParams = $this->sanitizeParams($decoded['api_params'] ?? []);
     // 2. Validate every field reference against the real schema; drop unknowns.
     $validated = \Civi\AiAssistant\QueryValidator::validate($entity, $apiParams);
@@ -103,7 +103,7 @@ class SearchKit extends AbstractAction {
     $changed = (string) ($decoded['changed'] ?? '');
 
     // 3. Run it transiently for a preview (ACL-checked, capped).
-    [$preview, $previewError] = $this->preview($entity, $apiParams);
+    [$preview, $previewTruncated, $previewError] = $this->preview($entity, $apiParams);
 
     $warnings = $issues;
     if ($previewError !== NULL) {
@@ -115,6 +115,7 @@ class SearchKit extends AbstractAction {
       'api_params' => $apiParams,
       'display' => $display,
       'preview' => $preview,
+      'preview_truncated' => $previewTruncated,
       'summary' => $summary,
       'changed' => $changed,
       'warning' => $warnings ? implode(' ', $warnings) : NULL,
@@ -249,8 +250,13 @@ TXT;
     if (isset($clean['where']) && !$clean['where']) {
       unset($clean['where']);
     }
-    $cap = (int) (\Civi::settings()->get('ai_preview_limit') ?: 25);
-    $clean['limit'] = min((int) ($clean['limit'] ?? $cap), $cap);
+    $limit = (int) ($clean['limit'] ?? 0);
+    if ($limit > 0) {
+      $clean['limit'] = $limit;
+    }
+    else {
+      unset($clean['limit']);
+    }
     return $clean;
   }
 
@@ -290,17 +296,21 @@ TXT;
   }
 
   /**
-   * Run the draft transiently to produce preview rows. Never persists anything.
-   * Returns [rows, warningOrNull].
+   * Run the draft transiently to produce preview rows, capped at the preview
+   * limit. Never persists anything. Returns [rows, truncated, warningOrNull].
    */
   private function preview(string $entity, array $apiParams): array {
+    $cap = (int) (\Civi::settings()->get('ai_preview_limit') ?: 25);
+    $limit = (int) ($apiParams['limit'] ?? 0);
+    $apiParams['limit'] = ($limit > 0 && $limit <= $cap) ? $limit : $cap + 1;
     try {
-      $rows = civicrm_api4($entity, 'get', $apiParams + ['checkPermissions' => TRUE]);
-      return [$rows->getArrayCopy(), NULL];
+      $rows = civicrm_api4($entity, 'get', $apiParams + ['checkPermissions' => TRUE])->getArrayCopy();
+      $truncated = count($rows) > $cap;
+      return [array_slice($rows, 0, $cap), $truncated, NULL];
     }
     catch (\Throwable $e) {
       // Return the draft anyway so the user can fine-tune it; surface the error.
-      return [[], 'Preview could not run: ' . $e->getMessage()];
+      return [[], FALSE, 'Preview could not run: ' . $e->getMessage()];
     }
   }
 

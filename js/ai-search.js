@@ -14,22 +14,33 @@
       $refineRun = $("#ai-refine-run"),
       $save = $("#ai-save"),
       $actions = $("#ai-actions"),
+      $truncated = $("#ai-truncated"),
       $print = $("#ai-print"),
+      $printAll = $("#ai-print-all"),
+      $csv = $("#ai-csv"),
+      $resultsAll = $("#ai-results-all"),
       $json = $("#ai-json");
 
     // Transient draft state — never written to the database here. The entity is
     // auto-detected server-side from the first prompt (no drop-down), then locked
     // for refinements of the same draft.
-    var state = {
-      entity: null,
-      apiParams: null,
-      display: null,
-      messages: [],
-    };
+    function emptyState() {
+      return {
+        entity: null,
+        apiParams: null,
+        display: null,
+        messages: [],
+        columns: [],
+        rows: [],
+        truncated: false,
+      };
+    }
+    var state = emptyState();
 
     function reset() {
-      state = { entity: null, apiParams: null, display: null, messages: [] };
+      state = emptyState();
       $results.empty();
+      $resultsAll.empty();
       $summary.empty();
       $refineWrap.hide();
       $actions.hide();
@@ -40,6 +51,8 @@
       $status.text(msg || "");
       $run.prop("disabled", busy);
       $refineRun.prop("disabled", busy);
+      $printAll.prop("disabled", busy);
+      $csv.prop("disabled", busy);
     }
 
     function escapeHtml(s) {
@@ -67,6 +80,26 @@
       });
     }
 
+    function tableHtml(cols, rows) {
+      var html = '<table class="ai-table"><thead><tr>';
+      cols.forEach(function (c) {
+        html += "<th>" + escapeHtml(c.label || c.key) + "</th>";
+      });
+      html += "</tr></thead><tbody>";
+      rows.forEach(function (row) {
+        html += "<tr>";
+        cols.forEach(function (c) {
+          html += "<td>" + escapeHtml(fmt(row[c.key])) + "</td>";
+        });
+        html += "</tr>";
+      });
+      html += "</tbody></table>";
+      if (!rows.length) {
+        html += '<p class="ai-empty">' + ts("No matching rows.") + "</p>";
+      }
+      return html;
+    }
+
     function render(r) {
       $summary.empty();
       if (r.api_entity) {
@@ -85,39 +118,95 @@
 
       var disp = r.display || { type: "table" };
       var rows = r.preview || [];
-      var html;
+      var cols =
+        disp.columns && disp.columns.length ? disp.columns : guessColumns(rows);
+      state.columns = cols;
+      state.rows = rows;
+      state.truncated = !!r.preview_truncated;
 
       if (disp.type === "single") {
         var first = rows[0] || {};
         var keys = Object.keys(first);
         var val = keys.length ? first[keys[0]] : ts("(no result)");
-        html = '<div class="ai-single">' + escapeHtml(fmt(val)) + "</div>";
+        $results.html(
+          '<div class="ai-single">' + escapeHtml(fmt(val)) + "</div>",
+        );
       } else {
-        var cols =
-          disp.columns && disp.columns.length
-            ? disp.columns
-            : guessColumns(rows);
-        html = '<table class="ai-table"><thead><tr>';
-        cols.forEach(function (c) {
-          html += "<th>" + escapeHtml(c.label || c.key) + "</th>";
-        });
-        html += "</tr></thead><tbody>";
-        rows.forEach(function (row) {
-          html += "<tr>";
-          cols.forEach(function (c) {
-            html += "<td>" + escapeHtml(fmt(row[c.key])) + "</td>";
-          });
-          html += "</tr>";
-        });
-        html += "</tbody></table>";
-        if (!rows.length) {
-          html += '<p class="ai-empty">' + ts("No matching rows.") + "</p>";
-        }
+        $results.html(tableHtml(cols, rows));
       }
-      $results.html(html);
+      $resultsAll.empty();
+      $truncated.text(
+        state.truncated
+          ? ts("Showing the first %1 rows.", { 1: rows.length })
+          : "",
+      );
+      $printAll.toggle(state.truncated);
       $actions.show();
       $refineWrap.show();
       $save.show();
+    }
+
+    // Runs the draft without the preview cap (APIv4 over AJAX always applies ACLs).
+    function fetchAll() {
+      if (!state.truncated) {
+        return $.Deferred().resolve(state.rows).promise();
+      }
+      setBusy(true, ts("Loading all rows…"));
+      return CRM.api4(state.entity, "get", state.apiParams).then(
+        function (rows) {
+          setBusy(false);
+          return rows;
+        },
+        function (err) {
+          setBusy(false);
+          CRM.alert(
+            err && err.error_message ? err.error_message : ts("Request failed"),
+            ts("AI Search"),
+            "error",
+          );
+        },
+      );
+    }
+
+    function csvCell(v) {
+      var s = fmt(v);
+      // Neutralise spreadsheet formula injection.
+      if (typeof v === "string" && /^[=+\-@\t\r]/.test(s) && isNaN(s)) {
+        s = "'" + s;
+      }
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+
+    function downloadCsv(rows) {
+      var lines = [
+        state.columns
+          .map(function (c) {
+            return csvCell(c.label || c.key);
+          })
+          .join(","),
+      ];
+      rows.forEach(function (row) {
+        lines.push(
+          state.columns
+            .map(function (c) {
+              return csvCell(row[c.key]);
+            })
+            .join(","),
+        );
+      });
+      // BOM so Excel detects UTF-8.
+      var blob = new Blob(["\ufeff" + lines.join("\r\n")], {
+        type: "text/csv;charset=utf-8",
+      });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download =
+        "ai-search-" + new Date().toISOString().slice(0, 10) + ".csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
 
     function ask(promptText) {
@@ -180,6 +269,26 @@
 
     $print.on("click", function () {
       window.print();
+    });
+    $printAll.on("click", function () {
+      fetchAll().then(function (rows) {
+        if (!rows) {
+          return;
+        }
+        $resultsAll.html(tableHtml(state.columns, rows));
+        $("body").addClass("ai-print-all");
+        window.print();
+      });
+    });
+    $(window).on("afterprint", function () {
+      $("body").removeClass("ai-print-all");
+    });
+    $csv.on("click", function () {
+      fetchAll().then(function (rows) {
+        if (rows) {
+          downloadCsv(rows);
+        }
+      });
     });
 
     // Save the current transient draft as a real SearchKit SavedSearch.

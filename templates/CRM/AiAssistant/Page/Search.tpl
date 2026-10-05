@@ -16,13 +16,18 @@
   </div>
 
   <div id="ai-actions" class="ai-actions" style="display:none;">
+    <span id="ai-truncated" class="ai-truncated"></span>
     <button id="ai-print" class="crm-button">{ts}Print{/ts}</button>
+    <button id="ai-print-all" class="crm-button">{ts}Print all{/ts}</button>
+    <button id="ai-csv" class="crm-button">{ts}Export CSV{/ts}</button>
   </div>
 
   <div id="ai-print-area">
     <div id="ai-summary" class="ai-summary"></div>
 
     <div id="ai-results" class="ai-results"></div>
+
+    <div id="ai-results-all" class="ai-results"></div>
   </div>
 
   <div id="ai-refine-wrap" class="ai-refine-wrap" style="display:none;">

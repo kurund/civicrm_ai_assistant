@@ -46,6 +46,7 @@ class Ai extends Generic\AbstractEntity {
         ['name' => 'api_params'],
         ['name' => 'display'],
         ['name' => 'preview'],
+        ['name' => 'preview_truncated'],
         ['name' => 'summary'],
         ['name' => 'changed'],
       ];
