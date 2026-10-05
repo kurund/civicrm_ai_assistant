@@ -6,11 +6,7 @@ use Civi\AiAssistant\Provider\OpenAiCompatibleProvider;
 use Civi\AiAssistant\Provider\ProviderInterface;
 
 /**
- * High-level entry point for all AI features. Handles message assembly,
- * best-effort redaction, audit logging and error handling. Registered in the
- * container as 'ai.llm' (see ai_assistant_civicrm_container).
- *
- * Every productivity feature should call this rather than a provider directly.
+ * Entry point for AI calls (service 'ai.llm'): redaction, logging, JSON decoding.
  */
 class LlmService {
 
@@ -18,7 +14,6 @@ class LlmService {
 
   public function provider(): ProviderInterface {
     if ($this->provider === NULL) {
-      // Swappable; only an OpenAI-compatible transport is shipped today.
       $this->provider = new OpenAiCompatibleProvider();
     }
     return $this->provider;
@@ -84,20 +79,16 @@ class LlmService {
     // Drop a leading reasoning block some local models emit before the answer.
     $raw = preg_replace('#<think\b[^>]*>.*?</think>#is', '', $raw) ?? $raw;
 
-    // Prefer the contents of a fenced code block if present.
     if (preg_match('/```(?:json)?\s*(.+?)```/is', $raw, $m)) {
       $raw = trim($m[1]);
     }
 
-    // Fast path: the whole (cleaned) string is JSON.
     $decoded = json_decode(trim($raw), TRUE);
     if (is_array($decoded)) {
       return $decoded;
     }
 
-    // Otherwise extract the first balanced { ... } object, ignoring braces that
-    // occur inside string literals (greedy first-to-last matching breaks when
-    // the response contains more than one object or stray braces in prose).
+    // Prose around the JSON can contain more objects or stray braces.
     $candidate = self::firstJsonObject($raw);
     if ($candidate !== NULL) {
       $decoded = json_decode($candidate, TRUE);
@@ -149,8 +140,7 @@ class LlmService {
   }
 
   /**
-   * Write an audit Activity when logging is enabled. Best-effort; never breaks
-   * the user flow.
+   * Log the exchange when ai_log_prompts is enabled.
    */
   private function maybeLog(array $sentMessages, string $response, array $options): void {
     if (!\Civi::settings()->get('ai_log_prompts')) {
@@ -165,7 +155,6 @@ class LlmService {
       \Civi::log('ai_assistant')->info('AI call', ['detail' => $detail]);
     }
     catch (\Throwable $e) {
-      // Swallow: logging must never interfere with the feature.
     }
   }
 

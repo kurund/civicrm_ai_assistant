@@ -37,8 +37,6 @@ function ai_assistant_civicrm_enable(): void {
 /**
  * Implements hook_civicrm_container().
  *
- * Registers the shared LlmService so any code can call Civi::service('ai.llm').
- *
  * @link https://docs.civicrm.org/dev/en/latest/hooks/hook_civicrm_container/
  */
 function ai_assistant_civicrm_container(\Symfony\Component\DependencyInjection\ContainerBuilder $container): void {
@@ -65,8 +63,6 @@ function ai_assistant_civicrm_permission(&$permissions): void {
 
 /**
  * Implements hook_civicrm_navigationMenu().
- *
- * Adds the end-user "AI Search" link (under Search) and the admin settings link.
  *
  * @link https://docs.civicrm.org/dev/en/latest/hooks/hook_civicrm_navigationMenu/
  */

@@ -3,17 +3,13 @@
 namespace Civi\AiAssistant;
 
 /**
- * Builds a compact, model-friendly description of an entity's fields so the LLM
- * can ground its query in REAL fields (no hallucinated columns).
- *
- * Only schema/metadata is produced here — never contact records — which is the
- * core reason the NL-to-query feature keeps PII out of the LLM.
+ * Compact field descriptions of the entities the assistant may query, for
+ * prompts.
  */
 class SchemaContext {
 
   /**
-   * Entities the assistant is allowed to query. Keep this conservative; expand
-   * deliberately. (A future enhancement: make this an admin setting.)
+   * Entities the assistant is allowed to query.
    *
    * @var string[]
    */
@@ -28,13 +24,12 @@ class SchemaContext {
   ];
 
   /**
-   * One-line description of each allowed entity, used to help the model pick a
-   * base entity when a prompt's keyword signals are ambiguous (EntityRouter).
+   * One-line description of each allowed entity, keyed by entity.
    *
-   * @var array<string,string>
+   * @var string[]
    */
   public static array $entityCatalog = [
-    'Contact' => 'People and organisations — donors, members, supporters — and their core fields.',
+    'Contact' => 'People and organisations - donors, members, supporters - and their core fields.',
     'Contribution' => 'Donations and payments: amount, date, financial type, payment/contribution status.',
     'Membership' => 'Memberships: type, status, join/start/end dates, renewals.',
     'Participant' => 'Event registrations: who registered, status, role, fee.',
@@ -98,7 +93,7 @@ class SchemaContext {
   }
 
   /**
-   * A flat, token-efficient string for embedding in a system prompt.
+   * The entity's fields as one "- name (description)" line each.
    */
   public static function asPromptBlock(string $entity): string {
     $lines = [];

@@ -1,4 +1,3 @@
-/* AI Search page */
 #ai-search-app .ai-search-bar {
   display: flex;
   align-items: flex-start;
@@ -15,7 +14,6 @@
   font-style: italic;
   color: #6b7280;
 }
-/* Visually hidden but available to screen readers. */
 #ai-search-app .ai-sr-only {
   position: absolute;
   width: 1px;
@@ -104,7 +102,7 @@
 }
 
 @media print {
-  /* visibility (not display) so the print area survives inside hidden CMS/theme wrappers */
+  /* A descendant can override visibility:hidden, so the print area still shows inside the page wrappers */
   body * {
     visibility: hidden;
   }

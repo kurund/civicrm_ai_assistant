@@ -3,18 +3,16 @@
 namespace Civi\AiAssistant;
 
 /**
- * Validates a model-generated query against the REAL schema (APIv4 getFields)
- * and repairs it by dropping references to fields that don't exist — so a
- * hallucinated column can't fail (or worse, silently distort) the query.
- *
- * This is the deterministic backstop: the model proposes, CiviCRM's own
- * metadata disposes. Resolves implicit joins via each field's fk_entity,
- * explicit-join aliases ("membership.status_id"), and tolerates `field:label`
- * pseudoconstant suffixes.
+ * Checks a model-generated query against APIv4 getFields and drops whatever
+ * references fields that don't exist.
  */
 class QueryValidator {
 
-  /** @var array<string,array> Per-entity field metadata, cached per request. */
+  /**
+   * Per-entity field metadata, cached per request.
+   *
+   * @var array[]
+   */
   private static array $cache = [];
 
   /**
@@ -41,9 +39,8 @@ class QueryValidator {
   /**
    * Does a (possibly dotted, possibly :suffixed) field path exist on $entity?
    * Implicit joins are resolved one segment at a time via fk_entity; a first
-   * segment naming an explicit join alias resolves against that join's entity.
-   *
-   * @param array<string,string> $joins  Explicit join alias => entity.
+   * segment naming a key of $joins (explicit join alias => entity) resolves
+   * against that join's entity.
    */
   public static function fieldExists(string $entity, string $path, array $joins = []): bool {
     $segments = explode('.', $path);
@@ -56,7 +53,7 @@ class QueryValidator {
     }
     $names = self::fieldNames($entity);
     if (!$names) {
-      // Metadata unavailable — don't block (fail open rather than mangle).
+      // Fails open: without metadata nothing can be checked.
       return TRUE;
     }
     if (!isset($names[$first])) {
@@ -79,9 +76,7 @@ class QueryValidator {
 
   /**
    * An alias derived from $alias that does not collide with any real field name
-   * on the entity (e.g. "total_amount" -> "total_amount_calc").
-   *
-   * @param array<string,array> $names  Field metadata keyed by field name.
+   * in $names (e.g. "total_amount" -> "total_amount_calc").
    */
   private static function nonCollidingAlias(string $alias, array $names): string {
     $candidate = $alias . '_calc';
@@ -154,22 +149,21 @@ class QueryValidator {
   }
 
   /**
-   * Validate & repair api_params. Returns ['params' => array, 'issues' => string[]].
+   * Validate and repair api_params.
+   *
+   * @return array{params: array, issues: string[]}
    */
   public static function validate(string $entity, array $params): array {
     $issues = [];
     if (!self::fieldNames($entity)) {
-      // Could not load metadata; skip rather than risk mangling a valid query.
       return ['params' => $params, 'issues' => $issues];
     }
 
     $names = self::fieldNames($entity);
 
-    // JOIN — must be run before the field checks, which resolve its aliases.
     [$joinClauses, $joins, $joinIssues] = self::validateJoins($entity, $params['join'] ?? []);
     $issues = array_merge($issues, $joinIssues);
 
-    // SELECT — keep "*", and any item whose underlying field resolves.
     if (!empty($params['select']) && is_array($params['select'])) {
       $kept = [];
       foreach ($params['select'] as $sel) {
@@ -184,10 +178,8 @@ class QueryValidator {
       $params['select'] = $kept ?: ['id'];
     }
 
-    // An expression alias that equals a real field name is rejected by APIv4
-    // ("Cannot use existing field name as alias", e.g. SUM(total_amount) AS
-    // total_amount). Rename it deterministically; remember the mapping so
-    // orderBy references to the old alias follow.
+    // APIv4 rejects an alias that equals a field name ("Cannot use existing
+    // field name as alias").
     $renamed = [];
     foreach (($params['select'] ?? []) as $i => $sel) {
       $alias = QueryNormalizer::selectAlias($sel);
@@ -199,7 +191,6 @@ class QueryValidator {
       }
     }
 
-    // WHERE — drop malformed clauses, bad operators, unknown fields.
     if (!empty($params['where']) && is_array($params['where'])) {
       $kept = [];
       foreach ($params['where'] as $clause) {
@@ -237,7 +228,6 @@ class QueryValidator {
       }
     }
 
-    // GROUP BY
     if (!empty($params['groupBy']) && is_array($params['groupBy'])) {
       $kept = [];
       foreach ($params['groupBy'] as $g) {
@@ -277,18 +267,12 @@ class QueryValidator {
     );
     $params['select'] = $params['select'] ?: ['id'];
     $issues = array_merge($issues, $fanOutIssues);
-    // When the select aggregates, every non-aggregated selected field must be
-    // grouped or MySQL errors (ONLY_FULL_GROUP_BY). Models routinely group by
-    // only the "main" field (e.g. contact_id) and omit the rest — add them.
     $required = QueryNormalizer::requiredGroupBy($params['select'] ?? [], !empty($params['groupBy']));
     if ($required) {
       $existing = $params['groupBy'] ?? [];
       $params['groupBy'] = array_values(array_unique(array_merge($existing, $required)));
     }
 
-    // Aliases produced by select are valid orderBy/having references. Also map
-    // each alias to its underlying expression, since APIv4 will not order by a
-    // bare alias — orderBy must reference the expression (e.g. SUM(total_amount)).
     $aliases = [];
     $aliasExpr = [];
     foreach ($params['select'] ?? [] as $sel) {
@@ -299,13 +283,11 @@ class QueryValidator {
       }
     }
 
-    // ORDER BY (already a {field: dir} map) — allow aliases or real fields.
     if (!empty($params['orderBy']) && is_array($params['orderBy'])) {
       $kept = [];
       foreach ($params['orderBy'] as $field => $dir) {
-        // Follow a renamed alias (orderBy total_amount -> total_amount_calc).
         $field = $renamed[$field] ?? $field;
-        // APIv4 rejects ordering by a bare alias; use the underlying expression.
+        // APIv4 cannot order by a bare alias, only by its expression.
         if (isset($aliasExpr[$field])) {
           $kept[$aliasExpr[$field]] = $dir;
         }

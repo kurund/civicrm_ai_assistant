@@ -3,9 +3,8 @@
 namespace Civi\AiAssistant;
 
 /**
- * Pure, deterministic transforms that repair common APIv4 shape mistakes in a
- * model-generated query — no LLM, no database. Kept side-effect-free so it is
- * unit-testable without a CiviCRM bootstrap.
+ * Pure transforms that repair common APIv4 shape mistakes in a model-generated
+ * query.
  */
 class QueryNormalizer {
 
@@ -66,14 +65,11 @@ class QueryNormalizer {
 
   /**
    * The underlying field a select item reads, with function wrapper and alias
-   * removed. "SUM(total_amount) AS total" -> "total_amount";
-   * "contact_id.display_name" -> "contact_id.display_name"; "COUNT(*)" -> "*".
+   * removed. "SUM(total_amount) AS total" -> "total_amount"; "COUNT(*)" -> "*".
    */
   public static function baseField($item): string {
     $item = trim((string) $item);
-    // Drop trailing alias.
     $item = preg_replace('/\s+AS\s+[A-Za-z0-9_]+$/i', '', $item);
-    // Unwrap a single function call: FN(expr) -> expr.
     if (preg_match('/^[A-Za-z_]+\s*\((.*)\)$/s', trim($item), $m)) {
       $item = trim($m[1]);
     }
@@ -81,16 +77,10 @@ class QueryNormalizer {
   }
 
   /**
-   * Repair a single where clause's SHAPE (not its field — that is the
-   * validator's job). Returns a clean [field, OP, value?] clause, or NULL if it
-   * is too malformed to use. Pure.
-   *
-   * Fixes the common model mistakes:
-   *  - BETWEEN/IN given as a flat list ([field, "BETWEEN", lo, hi]) instead of a
-   *    nested-array value ([field, "BETWEEN", [lo, hi]]) — APIv4 otherwise
-   *    mis-reads the loose values as field names;
-   *  - value-less operators (IS NULL, IS EMPTY, …) carrying a stray value;
-   *  - a scalar value where IN expects an array.
+   * Repair a where clause's shape into [field, OP, value?], or NULL if it is
+   * unusable. Pure. A flat [field, "BETWEEN", lo, hi] becomes
+   * [field, "BETWEEN", [lo, hi]], since APIv4 reads the loose values as field
+   * names.
    */
   public static function normalizeWhereClause($clause): ?array {
     if (!is_array($clause) || !isset($clause[0])) {
@@ -114,7 +104,6 @@ class QueryNormalizer {
       return $vals ? [$field, $op, $vals] : NULL;
     }
 
-    // Standard binary operator: [field, op, value].
     if (!array_key_exists(2, $clause)) {
       return NULL;
     }
@@ -124,8 +113,7 @@ class QueryNormalizer {
   /**
    * Repair one explicit join into APIv4's
    * ["Entity AS alias", "INNER"|"LEFT"|"EXCLUDE", [a, op, b], ...] form, or
-   * NULL if it is unusable. Shape only; fields are checked by the validator.
-   * Pure.
+   * NULL if it is unusable. Pure.
    *
    * Accepts the common model variants: an object
    * ({entity, alias, type, on}), a lowercase or SQL-ish side ("inner join"),
@@ -194,6 +182,8 @@ class QueryNormalizer {
 
   /**
    * [entity, alias] of a normalized join.
+   *
+   * @return string[]
    */
   public static function joinEntityAlias(array $join): array {
     [$entity, $alias] = array_map('trim', explode(' AS ', $join[0], 2));
@@ -201,8 +191,7 @@ class QueryNormalizer {
   }
 
   /**
-   * Is a join ON operand a field reference (vs. a quoted literal or number)?
-   * APIv4 treats unquoted ON operands as field names.
+   * Would APIv4 read this ON operand as a field name?
    */
   public static function isFieldOperand($operand): bool {
     return is_string($operand) && (bool) preg_match('/^[A-Za-z_][A-Za-z0-9_.:]*$/', $operand);
@@ -236,13 +225,10 @@ class QueryNormalizer {
    * Fix or remove aggregates that fan-out joins would inflate. Each row of the
    * aggregated entity is repeated once per match in every OTHER fan-out join,
    * so a total over contributions joined with memberships double-counts a
-   * contact who has two memberships. Pure.
-   *
-   * - COUNT of rows/ids becomes COUNT(DISTINCT ...) (exact);
-   * - GROUP_CONCAT gains DISTINCT; MIN/MAX are unaffected;
-   * - AVG is exact when grouped by the base id (every value repeats equally);
-   * - anything else (SUM, AVG across records, ...) cannot be expressed exactly
-   *   in APIv4 and is dropped with an issue rather than shown wrong.
+   * contact who has two memberships. Within one base record every value
+   * repeats equally, so AVG grouped by the base id stays exact; SUM cannot be
+   * corrected because APIv4 equations do not accept aggregate functions.
+   * Pure.
    *
    * @param string[] $select
    * @param string[] $fanOutAliases  Aliases of the fan-out joins.
@@ -300,7 +286,6 @@ class QueryNormalizer {
     if (!is_array($orderBy)) {
       return [];
     }
-    // Already associative: {"field": "DESC"}.
     if ($orderBy && array_keys($orderBy) !== range(0, count($orderBy) - 1)) {
       $out = [];
       foreach ($orderBy as $field => $dir) {
@@ -308,7 +293,6 @@ class QueryNormalizer {
       }
       return $out;
     }
-    // List of [field, dir] pairs or bare "field" strings.
     $out = [];
     foreach ($orderBy as $clause) {
       if (is_array($clause) && isset($clause[0])) {
@@ -323,15 +307,14 @@ class QueryNormalizer {
   }
 
   /**
-   * Is a select item an aggregate/function expression (vs. a plain field)?
+   * Is a select item a function expression?
    */
   public static function isExpression($item): bool {
     return strpos((string) $item, '(') !== FALSE;
   }
 
   /**
-   * SQL aggregate functions APIv4 supports. A select that uses one forces every
-   * non-aggregated selected field into groupBy (MySQL ONLY_FULL_GROUP_BY).
+   * SQL aggregate functions APIv4 supports.
    */
   public const AGGREGATE_FUNCTIONS = [
     'SUM', 'COUNT', 'AVG', 'MIN', 'MAX', 'GROUP_CONCAT', 'STDDEV',
@@ -349,19 +332,15 @@ class QueryNormalizer {
 
   /**
    * A select item with its "AS alias" removed but the expression intact:
-   * "SUM(total_amount) AS total" -> "SUM(total_amount)". (Unlike baseField,
-   * which also unwraps the function.)
+   * "SUM(total_amount) AS total" -> "SUM(total_amount)".
    */
   public static function stripAlias($item): string {
     return trim(preg_replace('/\s+AS\s+[A-Za-z0-9_]+$/i', '', trim((string) $item)));
   }
 
   /**
-   * The plain fields that MUST appear in groupBy for a given select: when the
-   * select contains an aggregate, every non-aggregated plain field has to be
-   * grouped. Pseudoconstant suffixes are stripped (group by the raw field).
-   * Returns [] when there is no aggregate and the query is not already grouped
-   * (no grouping required). Pure.
+   * The plain fields that must appear in groupBy (MySQL ONLY_FULL_GROUP_BY)
+   * when the select aggregates or the query is already grouped. Pure.
    *
    * @param string[] $select
    * @param bool $grouped  The query already has a groupBy.
@@ -375,7 +354,6 @@ class QueryNormalizer {
         $hasAggregate = TRUE;
         continue;
       }
-      // Leave non-aggregate expressions (e.g. YEAR(x)) for the model to group.
       if (self::isExpression($item)) {
         continue;
       }

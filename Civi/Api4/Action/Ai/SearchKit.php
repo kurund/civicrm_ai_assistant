@@ -8,16 +8,8 @@ use Civi\Api4\Generic\AbstractAction;
 use Civi\Api4\Generic\Result;
 
 /**
- * Natural-language -> SearchKit query + display spec.
- *
- * Produces a TRANSIENT draft (nothing is persisted): an APIv4 `api_params`
- * object, a `display` spec (single|table|list|chart) inferred from the request,
- * a few preview rows, and a plain-language summary. Pass an existing `apiParams`
- * (and `display`, `messages`) back in to fine-tune the same draft iteratively.
- *
- * Safety: the model only emits a query spec; CiviCRM validates it and runs it
- * with checkPermissions = TRUE, so ACLs always apply and a bad/adversarial spec
- * fails safe. Only schema + the prompt are sent to the LLM — never records.
+ * Natural-language -> unsaved APIv4 query, display spec, preview rows and
+ * summary. Pass apiParams, display and messages back in to refine the draft.
  *
  * @method $this setPrompt(string $prompt)
  * @method string getPrompt()
@@ -39,8 +31,7 @@ class SearchKit extends AbstractAction {
   protected string $prompt = '';
 
   /**
-   * Target entity. Optional override; when NULL it is auto-detected from the
-   * prompt (EntityRouter), defaulting to Contact.
+   * Target entity; auto-detected from the prompt when NULL.
    * @var string|null
    */
   protected ?string $entity = NULL;
@@ -90,19 +81,16 @@ class SearchKit extends AbstractAction {
 
     $decoded = $llm->completeJson($system, $messages, ['temperature' => 0.1]);
 
-    // 1. Normalize shape (strip bad aliases, fix orderBy form, clean limit).
     $apiParams = $this->sanitizeParams($decoded['api_params'] ?? []);
-    // 2. Validate every field reference against the real schema; drop unknowns.
     $validated = \Civi\AiAssistant\QueryValidator::validate($entity, $apiParams);
     $apiParams = $validated['params'];
     $issues = $validated['issues'];
 
     $keys = array_map([\Civi\AiAssistant\QueryNormalizer::class, 'selectResultKey'], $apiParams['select']);
-    $display = $this->sanitizeDisplay($decoded['display'] ?? NULL, $apiParams, $keys);
+    $display = $this->sanitizeDisplay($decoded['display'] ?? NULL, $keys);
     $summary = (string) ($decoded['summary'] ?? '');
     $changed = (string) ($decoded['changed'] ?? '');
 
-    // 3. Run it transiently for a preview (ACL-checked, capped).
     [$preview, $previewTruncated, $previewError] = $this->preview($entity, $apiParams);
 
     $warnings = $issues;
@@ -143,19 +131,19 @@ Return ONLY a JSON object with these keys:
 - "summary": one sentence describing what the query returns.
 - "changed": (only when refining) one sentence on what changed.
 
-APIv4 syntax rules — follow precisely:
-- "select": array of strings. ONLY function expressions may use "AS alias" — e.g. "COUNT(id) AS cnt", "SUM(total_amount) AS total". NEVER alias a plain field: write "contact_id.display_name", NOT "contact_id.display_name AS donor". When you use an aggregate, every non-aggregated selected field must also appear in groupBy.
+APIv4 syntax rules - follow precisely:
+- "select": array of strings. ONLY function expressions may use "AS alias" - e.g. "COUNT(id) AS cnt", "SUM(total_amount) AS total". NEVER alias a plain field: write "contact_id.display_name", NOT "contact_id.display_name AS donor". When you use an aggregate, every non-aggregated selected field must also appear in groupBy.
 - An alias must NOT be the same as an existing field name. For SUM(total_amount) write "SUM(total_amount) AS total" (or "AS total_sum"), NEVER "AS total_amount".
 - To read a field on a RELATED entity, use the foreign-key field, a dot, then the field: e.g. "contact_id.display_name", NOT "contact.display_name".
 - A contact's email/phone/address are SEPARATE related records, not plain fields. Read the primary one via an implicit join: "contact_id.email_primary.email", "contact_id.phone_primary.phone", "contact_id.address_primary.street_address". There is NO "contact_id.email" or "contact_id.phone" field. (When the base entity IS Contact, drop the "contact_id." prefix: "email_primary.email".)
 - In "display".columns and "orderBy", reference a plain field by its full path (e.g. "contact_id.display_name") and an aggregate by its alias (e.g. "total").
-- "where": array of [field, operator, value]. Operators: "=", "!=", ">", "<", ">=", "<=", "IN", "NOT IN", "LIKE", "IS NULL", "IS NOT NULL", "BETWEEN". For IS NULL / IS NOT NULL omit the value: [field, "IS NOT NULL"]. For BETWEEN and IN the value is a SINGLE array: ["receive_date", "BETWEEN", ["2026-01-01", "2026-12-31"]], ["status_id", "IN", [1, 2]] — NOT [field, "BETWEEN", lo, hi].
+- "where": array of [field, operator, value]. Operators: "=", "!=", ">", "<", ">=", "<=", "IN", "NOT IN", "LIKE", "IS NULL", "IS NOT NULL", "BETWEEN". For IS NULL / IS NOT NULL omit the value: [field, "IS NOT NULL"]. For BETWEEN and IN the value is a SINGLE array: ["receive_date", "BETWEEN", ["2026-01-01", "2026-12-31"]], ["status_id", "IN", [1, 2]] - NOT [field, "BETWEEN", lo, hi].
 - "orderBy": an OBJECT mapping a field or select-alias to "ASC" or "DESC". CORRECT: {"total": "DESC"}. WRONG: [["total","DESC"]].
 - "groupBy": array of field names (no aliases).
 - "limit": integer.
 - Use ONLY field names from the list below (plus implicit-join paths described above and fields of entities you join). Do not invent fields.
 
-Explicit joins — use when the request combines records of ANOTHER entity that points back at this one (e.g. contacts who have a membership AND a contribution):
+Explicit joins - use when the request combines records of ANOTHER entity that points back at this one (e.g. contacts who have a membership AND a contribution):
 - "join": array of ["Entity AS alias", "INNER"|"LEFT"|"EXCLUDE", [left, "=", right]]. INNER = must have a matching record, EXCLUDE = must NOT have one, LEFT = optional (to show its fields).
 - Joinable entities: {$joinable}.
 - The ON condition links the two by field names, e.g. ["id", "=", "membership.contact_id"] from Contact, or ["contact_id", "=", "membership.contact_id"] from Contribution.
@@ -191,10 +179,8 @@ TXT;
   }
 
   /**
-   * Decide which entity to query. An explicit, permitted `entity` always wins
-   * (the UI passes the locked entity back when refining). Otherwise, for a fresh
-   * request, auto-detect it from the prompt; refinements default to the base
-   * entity since routing on a "tweak" instruction is unreliable.
+   * The explicit entity if permitted; otherwise Contact for a refinement, or
+   * auto-detected for a new request.
    */
   private function resolveEntity(\Civi\AiAssistant\LlmService $llm): string {
     if ($this->entity && SchemaContext::isAllowed($this->entity)) {
@@ -210,15 +196,13 @@ TXT;
   }
 
   /**
-   * Ask the model which entity the request targets, before building the real
-   * query — a cheap call that tolerates typos and informal wording. Best-effort:
-   * any failure returns '' so EntityRouter falls back to keyword routing.
+   * Ask the model which entity the request targets; '' on any failure.
    */
   private function classifyEntity(\Civi\AiAssistant\LlmService $llm, string $prompt): string {
     $list = implode(', ', SchemaContext::$allowedEntities);
     $catalog = SchemaContext::catalogBlock();
     $system = "You route a CiviCRM search request to the single entity whose own records best answer it. "
-      . "The request may contain typos, abbreviations or informal wording — infer intent. "
+      . "The request may contain typos, abbreviations or informal wording - infer intent. "
       . "Prefer Contact unless the request is fundamentally about another entity's records or aggregates. "
       . "A request that combines several record types about the same people (e.g. donors who are also members) is about Contact. "
       . "Reply with ONLY JSON: {\"entity\": \"<one of: {$list}>\"}.\n\nEntities:\n{$catalog}";
@@ -232,9 +216,7 @@ TXT;
   }
 
   /**
-   * Normalize query shape (no schema lookups): keep allowed keys, strip bad
-   * aliases, coerce orderBy, drop empty where, and cap the limit. Field-level
-   * validation against the real schema happens in QueryValidator.
+   * Normalize query shape without schema lookups.
    */
   private function sanitizeParams(array $params): array {
     $clean = array_intersect_key($params, array_flip(self::ALLOWED_PARAM_KEYS));
@@ -252,7 +234,6 @@ TXT;
       }
     }
     if (isset($clean['where']) && is_array($clean['where'])) {
-      // Repair clause shape (e.g. flat BETWEEN/IN -> nested-array value).
       $clean['where'] = array_values(array_filter(array_map(
         [\Civi\AiAssistant\QueryNormalizer::class, 'normalizeWhereClause'],
         $clean['where']
@@ -272,23 +253,19 @@ TXT;
   }
 
   /**
-   * Validate the display spec and align its columns to the ACTUAL result keys,
-   * so a stripped alias can't leave a column pointing at a nonexistent field.
-   *
-   * @param string[] $keys  Result keys derived from the cleaned select.
+   * Validate the display spec and align its columns to the ACTUAL result keys
+   * ($keys, derived from the cleaned select), so a stripped alias can't leave a
+   * column pointing at a nonexistent field.
    */
-  private function sanitizeDisplay(?array $display, array $apiParams, array $keys): array {
+  private function sanitizeDisplay(?array $display, array $keys): array {
     $type = $display['type'] ?? 'table';
     if (!in_array($type, self::ALLOWED_DISPLAY_TYPES, TRUE)) {
       $type = 'table';
     }
-    // A "single" display must come from a one-value query.
     if ($type === 'single' && count($keys) > 1) {
       $type = 'table';
     }
 
-    // Rebuild columns positionally from the real keys, preserving the model's
-    // labels/formats where it supplied them.
     $modelCols = is_array($display['columns'] ?? NULL) ? array_values($display['columns']) : [];
     $columns = [];
     foreach ($keys as $i => $key) {
@@ -307,8 +284,8 @@ TXT;
   }
 
   /**
-   * Run the draft transiently to produce preview rows, capped at the preview
-   * limit. Never persists anything. Returns [rows, truncated, warningOrNull].
+   * Preview rows capped at ai_preview_limit. Returns [rows, truncated,
+   * warningOrNull].
    */
   private function preview(string $entity, array $apiParams): array {
     $cap = (int) (\Civi::settings()->get('ai_preview_limit') ?: 25);
@@ -320,7 +297,6 @@ TXT;
       return [array_slice($rows, 0, $cap), $truncated, NULL];
     }
     catch (\Throwable $e) {
-      // Return the draft anyway so the user can fine-tune it; surface the error.
       return [[], FALSE, 'Preview could not run: ' . $e->getMessage()];
     }
   }

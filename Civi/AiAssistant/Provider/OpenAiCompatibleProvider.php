@@ -3,11 +3,8 @@
 namespace Civi\AiAssistant\Provider;
 
 /**
- * Single provider covering the entire OpenAI-compatible ecosystem:
- * OpenRouter (default), OpenAI, Azure OpenAI, Ollama, vLLM, llama.cpp, etc.
- *
- * Switching provider is purely a settings change (base URL + model + key);
- * this class never needs editing.
+ * Chat completions against any OpenAI-compatible endpoint (OpenRouter, OpenAI,
+ * Azure, Ollama, vLLM, ...).
  */
 class OpenAiCompatibleProvider implements ProviderInterface {
 
@@ -22,19 +19,15 @@ class OpenAiCompatibleProvider implements ProviderInterface {
       throw new \CRM_Core_Exception('AI Assistant is not configured: set the provider base URL and model.');
     }
 
-    // The model setting may be a comma-separated list. The first is the primary;
-    // any others are OpenRouter fallbacks, tried in order when the primary is
-    // unavailable or rate-limited (free models 429 often). Ignored by providers
-    // that don't support the `models` field.
+    // Extra comma-separated models go in OpenRouter's `models` fallback list;
+    // other providers ignore that field.
     $models = array_values(array_filter(array_map('trim', explode(',', $modelSetting))));
     $payload = [
       'model' => $models[0],
       'messages' => array_values($messages),
       'temperature' => $options['temperature'] ?? 0.2,
     ];
-    // Cap (and reserve) output length. The standard OpenAI field; Ollama's
-    // OpenAI-compatible layer maps it to num_predict, so a long JSON query is
-    // not truncated mid-object (its default predict budget is small).
+    // Ollama maps max_tokens to num_predict, whose small default truncates JSON.
     if ($maxTokens > 0) {
       $payload['max_tokens'] = $maxTokens;
     }
@@ -42,8 +35,6 @@ class OpenAiCompatibleProvider implements ProviderInterface {
       $payload['models'] = $models;
     }
     if (!empty($options['json'])) {
-      // OpenAI-compatible structured output hint. Providers that don't support
-      // it ignore the field; we also instruct JSON in the system prompt.
       $payload['response_format'] = ['type' => 'json_object'];
     }
 
@@ -51,7 +42,6 @@ class OpenAiCompatibleProvider implements ProviderInterface {
     if ($apiKey !== '') {
       $headers['Authorization'] = 'Bearer ' . $apiKey;
     }
-    // Optional OpenRouter attribution headers (harmlessly ignored elsewhere).
     $referer = (string) \Civi::settings()->get('ai_referer');
     $title = (string) \Civi::settings()->get('ai_title');
     if ($referer !== '') {
@@ -66,8 +56,6 @@ class OpenAiCompatibleProvider implements ProviderInterface {
       'connect_timeout' => 10,
     ]);
 
-    // Up to 2 attempts: one short retry on transient rate-limit/server errors
-    // (e.g. free-model 429s).
     $response = NULL;
     $maxAttempts = 2;
     for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
@@ -86,7 +74,7 @@ class OpenAiCompatibleProvider implements ProviderInterface {
         }
         if ($status === 429) {
           throw new \CRM_Core_Exception(
-            'The AI model is rate-limited right now (HTTP 429). This is common on free models — '
+            'The AI model is rate-limited right now (HTTP 429). This is common on free models - '
             . 'try a different model, list fallback models (comma-separated) in settings, add provider credit, or use a local model.'
           );
         }

@@ -3,8 +3,7 @@
 namespace Civi\AiAssistant\Provider;
 
 /**
- * Contract for an LLM provider. Implementations are responsible only for
- * transport; prompt assembly, redaction and logging live in LlmService.
+ * An LLM chat transport.
  */
 interface ProviderInterface {
 

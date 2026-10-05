@@ -5,7 +5,7 @@ namespace Civi\AiAssistant;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Pure unit tests that need no CiviCRM bootstrap (JSON extraction logic).
+ * JSON extraction and retry.
  *
  * @group unit
  */
@@ -34,17 +34,13 @@ class LlmServiceTest extends TestCase {
   }
 
   public function testStripsThinkBlock(): void {
-    // Reasoning models emit <think>…</think> (which itself may contain braces)
-    // before the real answer.
     $raw = "<think>The user wants {a count}. I'll use COUNT.</think>\n{\"type\":\"single\"}";
     $out = LlmService::extractJson($raw);
     $this->assertSame('single', $out['type']);
   }
 
   public function testExtractsBalancedObjectWithTrailingProse(): void {
-    // A nested object plus commentary after the close — greedy matching would
-    // have swallowed the trailing "}" in prose; balanced extraction stops dead.
-    $raw = 'Here: {"display":{"type":"table"},"limit":10} — hope that helps! }';
+    $raw = 'Here: {"display":{"type":"table"},"limit":10} - hope that helps! }';
     $out = LlmService::extractJson($raw);
     $this->assertSame(['type' => 'table'], $out['display']);
     $this->assertSame(10, $out['limit']);
@@ -59,9 +55,19 @@ class LlmServiceTest extends TestCase {
   private function fakeLlm(array $replies): LlmService {
     return new class($replies) extends LlmService {
 
+      /**
+       * @var array[]
+       */
       public array $calls = [];
 
-      public function __construct(private array $replies) {}
+      /**
+       * @var string[]
+       */
+      private array $replies;
+
+      public function __construct(array $replies) {
+        $this->replies = $replies;
+      }
 
       public function complete(?string $system, array $messages, array $options = []): string {
         $this->calls[] = $messages;

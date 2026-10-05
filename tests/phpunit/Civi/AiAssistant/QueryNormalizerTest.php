@@ -5,15 +5,13 @@ namespace Civi\AiAssistant;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Unit tests for the deterministic query-repair helpers. No CiviCRM bootstrap
- * required — these are pure string/array transforms.
+ * Query-repair helpers.
  *
  * @group unit
  */
 class QueryNormalizerTest extends TestCase {
 
   public function testStripsAliasFromPlainField(): void {
-    // APIv4 forbids "field AS alias" — must become a bare field.
     $this->assertSame(
       'contact_id.display_name',
       QueryNormalizer::cleanSelectItem('contact_id.display_name AS donor')
@@ -42,7 +40,6 @@ class QueryNormalizerTest extends TestCase {
   }
 
   public function testNormalizeOrderByFromPairs(): void {
-    // The exact bug we hit: [["total","DESC"]] -> {"total":"DESC"}.
     $this->assertSame(
       ['total' => 'DESC'],
       QueryNormalizer::normalizeOrderBy([['total', 'DESC']])
@@ -74,7 +71,6 @@ class QueryNormalizerTest extends TestCase {
       'SUM(total_amount) AS total_amount_calc',
       QueryNormalizer::renameAlias('SUM(total_amount) AS total_amount', 'total_amount_calc')
     );
-    // No alias present -> unchanged.
     $this->assertSame(
       'contact_id.display_name',
       QueryNormalizer::renameAlias('contact_id.display_name', 'whatever')
@@ -82,7 +78,6 @@ class QueryNormalizerTest extends TestCase {
   }
 
   public function testNormalizeWhereWrapsFlatBetween(): void {
-    // The exact preview-breaking bug: a flat BETWEEN must become a nested pair.
     $this->assertSame(
       ['receive_date', 'BETWEEN', ['2026-01-01 00:00:00', '2026-12-31 23:59:59']],
       QueryNormalizer::normalizeWhereClause(['receive_date', 'BETWEEN', '2026-01-01 00:00:00', '2026-12-31 23:59:59'])
@@ -127,7 +122,6 @@ class QueryNormalizerTest extends TestCase {
     $this->assertTrue(QueryNormalizer::isAggregate('SUM(total_amount) AS total'));
     $this->assertTrue(QueryNormalizer::isAggregate('COUNT(id)'));
     $this->assertFalse(QueryNormalizer::isAggregate('contact_id.display_name'));
-    // A non-aggregate function is not an aggregate.
     $this->assertFalse(QueryNormalizer::isAggregate('YEAR(receive_date) AS yr'));
   }
 
@@ -137,7 +131,6 @@ class QueryNormalizerTest extends TestCase {
   }
 
   public function testRequiredGroupByAddsNonAggregatedFields(): void {
-    // The exact "top donors" shape: model groups by contact_id only.
     $this->assertSame(
       ['contact_id.display_name', 'contact_id.email_primary.email'],
       QueryNormalizer::requiredGroupBy([

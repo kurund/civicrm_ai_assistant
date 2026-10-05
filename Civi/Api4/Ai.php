@@ -5,16 +5,13 @@ namespace Civi\Api4;
 /**
  * AI Assistant services.
  *
- * The shared integration surface for AI productivity features. `prompt` is the
- * reusable primitive; `searchKit` is the flagship natural-language search.
- *
  * @searchable none
  * @package Civi\Api4
  */
 class Ai extends Generic\AbstractEntity {
 
   /**
-   * Generic LLM completion (the reusable spine other features build on).
+   * Generic LLM completion.
    *
    * @param bool $checkPermissions
    * @return Action\Ai\Prompt
@@ -54,7 +51,7 @@ class Ai extends Generic\AbstractEntity {
   }
 
   /**
-   * Restrict who may call this entity's actions.
+   * Permissions per action.
    *
    * @return array
    */

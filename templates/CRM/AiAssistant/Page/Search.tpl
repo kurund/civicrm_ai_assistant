@@ -1,6 +1,3 @@
-{*
-  AI Search page shell. Logic lives in js/ai-search.js (calls Ai.searchKit).
-*}
 <div class="crm-block crm-content-block" id="ai-search-app">
 
   <div class="help">

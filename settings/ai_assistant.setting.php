@@ -10,7 +10,6 @@ $group = [
   'add' => '0.1',
 ];
 
-// Helper to tag a setting onto the admin page, in a section, at a weight.
 $page = fn(string $section, int $weight): array => [
   'settings_pages' => ['ai_assistant' => ['section' => $section, 'weight' => $weight]],
 ];
@@ -29,8 +28,7 @@ return [
     'name' => 'ai_model',
     'type' => 'String',
     'html_type' => 'text',
-    // Free OpenRouter slugs as a fallback chain (primary first). Free models
-    // rotate in/out — if these 404, pick current ones at https://openrouter.ai/models
+    // OpenRouter free models are withdrawn over time; a 404 means pick current ones.
     'default' => 'deepseek/deepseek-v4-flash:free,google/gemma-4-31b-it:free',
     'title' => E::ts('Model'),
     'description' => E::ts('Model slug. For OpenRouter free models use a ":free" slug. Tip: list several comma-separated (primary first) and OpenRouter will fall back to the next when one is rate-limited. Browse https://openrouter.ai/models.'),
@@ -90,9 +88,6 @@ return [
     'description' => E::ts('Record exactly what was sent and received, for transparency and incident review.'),
     'help_text' => NULL,
   ],
-  // NOTE: ai_max_rows_context (cap on sample record rows sent to the model) was
-  // removed in v0.1 — the NL->query feature sends no records, so nothing used it.
-  // Re-add it alongside the first feature that sends row data (e.g. summarisation).
   'ai_preview_limit' => $group + $page('limits', 10) + [
     'name' => 'ai_preview_limit',
     'type' => 'Integer',

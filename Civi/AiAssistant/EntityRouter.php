@@ -3,15 +3,8 @@
 namespace Civi\AiAssistant;
 
 /**
- * Resolves which entity a natural-language request targets
- *
- * A dedicated, lightweight LLM classification runs first: it is robust to
- * typos, synonyms and informal phrasing in a way keyword matching can't be
- * ("donrs over 100", "ppl who attended"). The deterministic keyword pass is
- * kept purely as an OFFLINE fallback — used only when the model is unavailable
- * or returns something invalid — and is pure/unit-testable (no LLM, no DB).
- * Contact is the safe default base entity (most requests are about people, and
- * cross-entity filters resolve through implicit joins).
+ * Resolves which entity a natural-language request targets: an LLM classifier
+ * first, then keyword matching when it is unavailable or returns nothing valid.
  */
 class EntityRouter {
 
@@ -53,28 +46,24 @@ class EntityRouter {
    * Resolve the best entity for a prompt.
    *
    * @param string $prompt
-   *   The natural-language request (may contain typos / informal wording).
+   *   The natural-language request.
    * @param callable|null $classify
    *   LLM classifier: fn(string $prompt): string returning a permitted entity.
-   *   Tried first; any invalid/empty result falls through to keyword routing.
    *
-   * @return string A permitted entity (always falls back to "Contact").
+   * @return string A permitted entity, "Contact" when nothing else fits.
    */
   public static function detect(string $prompt, ?callable $classify = NULL): string {
-    // Primary: let the model read intent (handles typos, synonyms, phrasing).
     if ($classify) {
       $picked = (string) $classify($prompt);
       if (SchemaContext::isAllowed($picked)) {
         return $picked;
       }
     }
-    // Offline fallback: deterministic keyword routing, defaulting to Contact.
     return self::keywordRoute($prompt);
   }
 
   /**
-   * Deterministic, LLM-free routing: a single clear signal wins, otherwise
-   * Contact. Used as the offline fallback and independently unit-testable.
+   * Keyword routing: a single clear signal wins, otherwise Contact.
    */
   public static function keywordRoute(string $prompt): string {
     $matches = self::keywordMatches($prompt);

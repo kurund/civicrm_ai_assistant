@@ -1,5 +1,3 @@
-// AI Search — calls the Ai.searchKit APIv4 action and renders the result.
-// Generate -> refine -> preview loop. Nothing is persisted unless "Save" is used.
 (function ($, ts) {
   "use strict";
 
@@ -21,9 +19,6 @@
       $resultsAll = $("#ai-results-all"),
       $json = $("#ai-json");
 
-    // Transient draft state — never written to the database here. The entity is
-    // auto-detected server-side from the first prompt (no drop-down), then locked
-    // for refinements of the same draft.
     function emptyState() {
       return {
         entity: null,
@@ -146,7 +141,7 @@
       $save.show();
     }
 
-    // Runs the draft without the preview cap (APIv4 over AJAX always applies ACLs).
+    // APIv4 over AJAX always applies ACLs.
     function fetchAll() {
       if (!state.truncated) {
         return $.Deferred().resolve(state.rows).promise();
@@ -223,7 +218,6 @@
       }).then(
         function (rows) {
           var r = rows[0] || {};
-          // Lock the auto-detected entity so refinements stay on the same draft.
           state.entity = r.api_entity || state.entity;
           state.apiParams = r.api_params || null;
           state.display = r.display || null;
@@ -243,8 +237,6 @@
       );
     }
 
-    // A top-level search always starts a fresh draft (re-detecting the entity);
-    // "Refine" continues the current draft.
     $run.on("click", function () {
       reset();
       ask($.trim($prompt.val()));
@@ -253,7 +245,6 @@
       ask($.trim($refine.val()));
     });
 
-    // Enter submits the main prompt (Shift+Enter for newline).
     $prompt.on("keydown", function (e) {
       if (e.which === 13 && !e.shiftKey) {
         e.preventDefault();
@@ -291,7 +282,6 @@
       });
     });
 
-    // Save the current transient draft as a real SearchKit SavedSearch.
     $save.on("click", function () {
       if (!state.apiParams) {
         return;

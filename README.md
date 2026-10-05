@@ -6,11 +6,11 @@ refinement.
 
 ## What it does
 
-- `Ai.prompt` (APIv4) — the reusable LLM primitive every feature builds on.
-- `Ai.searchKit` (APIv4) — turns a request like _"lapsed United Kingdom donors over $100"_ into
+- `Ai.prompt` (APIv4) - the reusable LLM primitive every feature builds on.
+- `Ai.searchKit` (APIv4) - turns a request like _"lapsed United Kingdom donors over $100"_ into
   a transient SearchKit query + a display spec, runs a permission-checked preview, and lets
   you refine it conversationally. Nothing is saved unless you choose to.
-- **Entity auto-detection** — The target entity (Contact, Contribution, Membership, …)
+- **Entity auto-detection** - The target entity (Contact, Contribution, Membership, …)
   is inferred from the prompt by a small, dedicated LLM
   classification call that tolerates typos and informal wording, before the query is built.
   A deterministic keyword router is the offline fallback, and Contact is the safe default.
@@ -20,11 +20,11 @@ refinement.
 ## Provider configuration
 
 Default provider is **OpenRouter** (`https://openrouter.ai/api/v1`) because it is
-OpenAI-compatible and has a free tier — paste one API key and go. Point the base URL at
+OpenAI-compatible and has a free tier - paste one API key and go. Point the base URL at
 OpenAI, Azure, or a local **Ollama/vLLM** server to change provider; no code changes.
 
 Configure at **Administer → Customize Data and Screens → AI Assistant Settings**
-(`civicrm/admin/settings/ai-assistant`) — a metadata-driven page grouped into Provider,
+(`civicrm/admin/settings/ai-assistant`) - a metadata-driven page grouped into Provider,
 Privacy & PII, and Limits sections. Or set values via the `Setting` API:
 
 | Setting                | Default                        |
@@ -39,9 +39,9 @@ Privacy & PII, and Limits sections. Or set values via the `Setting` API:
 
 ## PII posture (read this)
 
-- The NL→query feature sends only **schema + your prompt** to the model — **never records**.
+- The NL→query feature sends only **schema + your prompt** to the model - **never records**.
 - The only **guarantee** that PII never leaves your infra is pointing the base URL at a
-  **local model**. The default free tier is cloud and may log prompts — treat it as
+  **local model**. The default free tier is cloud and may log prompts - treat it as
   evaluation/low-sensitivity only.
 - `Redactor` masks structured identifiers (emails/phones) best-effort; it cannot catch plain
   names.
@@ -97,7 +97,7 @@ Civi/AiAssistant/QueryValidator.php       schema-driven field validation (getFie
 
 The model proposes; deterministic code disposes. After the LLM returns `api_params`:
 
-1. **QueryNormalizer** (pure, unit-tested) repairs shape mistakes without touching the DB —
+1. **QueryNormalizer** (pure, unit-tested) repairs shape mistakes without touching the DB -
    strips disallowed aliases off plain fields, coerces `orderBy` into APIv4's `{field: dir}`
    form, wraps flat `BETWEEN`/`IN` values into the required nested array, and caps the limit.
 2. **QueryValidator** checks every `select`/`where`/`groupBy`/`orderBy` field reference
@@ -110,4 +110,4 @@ AS total_amount` → renamed), ordering by a bare alias (rewritten to the underl
 3. The repaired query runs transiently with `checkPermissions = TRUE` for the preview.
 
 So a hallucinated field or malformed clause is removed deterministically rather than failing
-the query — the LLM's correctness matters less over time.
+the query - the LLM's correctness matters less over time.

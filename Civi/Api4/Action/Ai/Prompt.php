@@ -6,7 +6,7 @@ use Civi\Api4\Generic\AbstractAction;
 use Civi\Api4\Generic\Result;
 
 /**
- * Generic LLM completion — the reusable primitive.
+ * Generic LLM completion.
  *
  * @method $this setSystem(?string $system)
  * @method string|null getSystem()
