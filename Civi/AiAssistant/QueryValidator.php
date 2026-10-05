@@ -199,19 +199,6 @@ class QueryValidator {
       }
     }
 
-    // Aliases produced by select are valid orderBy/having references. Also map
-    // each alias to its underlying expression, since APIv4 will not order by a
-    // bare alias — orderBy must reference the expression (e.g. SUM(total_amount)).
-    $aliases = [];
-    $aliasExpr = [];
-    foreach ($params['select'] ?? [] as $sel) {
-      $aliases[QueryNormalizer::selectResultKey($sel)] = TRUE;
-      $alias = QueryNormalizer::selectAlias($sel);
-      if ($alias !== NULL) {
-        $aliasExpr[$alias] = QueryNormalizer::stripAlias($sel);
-      }
-    }
-
     // WHERE — drop malformed clauses, bad operators, unknown fields.
     if (!empty($params['where']) && is_array($params['where'])) {
       $kept = [];
@@ -278,13 +265,18 @@ class QueryValidator {
 
     // A join onto a one-to-many entity (a contact's contributions) repeats the
     // base row once per match; group by the base id to keep one row each.
-    $fansOut = FALSE;
-    foreach ($joinClauses as $join) {
-      $fansOut = $fansOut || $join[1] !== 'EXCLUDE';
-    }
-    if ($fansOut && empty($params['groupBy'])) {
+    $fanOutAliases = array_keys(array_filter($joinClauses, [QueryNormalizer::class, 'isFanOutJoin']));
+    $aggregates = array_filter($params['select'] ?? [], [QueryNormalizer::class, 'isAggregate']);
+    if ($fanOutAliases && !$aggregates && empty($params['groupBy'])) {
       $params['groupBy'] = ['id'];
     }
+    [$params['select'], $fanOutIssues] = QueryNormalizer::guardFanOutAggregates(
+      $params['select'] ?? [],
+      $fanOutAliases,
+      in_array('id', $params['groupBy'] ?? [], TRUE)
+    );
+    $params['select'] = $params['select'] ?: ['id'];
+    $issues = array_merge($issues, $fanOutIssues);
     // When the select aggregates, every non-aggregated selected field must be
     // grouped or MySQL errors (ONLY_FULL_GROUP_BY). Models routinely group by
     // only the "main" field (e.g. contact_id) and omit the rest — add them.
@@ -292,6 +284,19 @@ class QueryValidator {
     if ($required) {
       $existing = $params['groupBy'] ?? [];
       $params['groupBy'] = array_values(array_unique(array_merge($existing, $required)));
+    }
+
+    // Aliases produced by select are valid orderBy/having references. Also map
+    // each alias to its underlying expression, since APIv4 will not order by a
+    // bare alias — orderBy must reference the expression (e.g. SUM(total_amount)).
+    $aliases = [];
+    $aliasExpr = [];
+    foreach ($params['select'] ?? [] as $sel) {
+      $aliases[QueryNormalizer::selectResultKey($sel)] = TRUE;
+      $alias = QueryNormalizer::selectAlias($sel);
+      if ($alias !== NULL) {
+        $aliasExpr[$alias] = QueryNormalizer::stripAlias($sel);
+      }
     }
 
     // ORDER BY (already a {field: dir} map) — allow aliases or real fields.

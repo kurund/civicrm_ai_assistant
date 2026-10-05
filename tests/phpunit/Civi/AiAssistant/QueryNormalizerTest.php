@@ -227,4 +227,54 @@ class QueryNormalizerTest extends TestCase {
     );
   }
 
+  public function testIsFanOutJoin(): void {
+    $this->assertTrue(QueryNormalizer::isFanOutJoin(['Membership AS m', 'INNER', ['id', '=', 'm.contact_id']]));
+    $this->assertFalse(QueryNormalizer::isFanOutJoin(['Contact AS c', 'INNER', ['contact_id', '=', 'c.id']]));
+    $this->assertFalse(QueryNormalizer::isFanOutJoin(['Contact AS c', 'LEFT', ['c.id', '=', 'contact_id']]));
+    $this->assertFalse(QueryNormalizer::isFanOutJoin(['Contribution AS c', 'EXCLUDE', ['id', '=', 'c.contact_id']]));
+  }
+
+  public function testGuardFanOutLeavesSingleJoinAggregatesAlone(): void {
+    $select = ['display_name', 'SUM(contribution.total_amount) AS total', 'COUNT(contribution.id) AS n'];
+    $this->assertSame([$select, []], QueryNormalizer::guardFanOutAggregates($select, ['contribution'], TRUE));
+    $this->assertSame([$select, []], QueryNormalizer::guardFanOutAggregates($select, [], FALSE));
+  }
+
+  public function testGuardFanOutRewritesCountsAndConcat(): void {
+    [$select, $issues] = QueryNormalizer::guardFanOutAggregates(
+      ['COUNT(contribution.id) AS n', 'COUNT(*) AS people', 'GROUP_CONCAT(membership.membership_type_id:label) AS types', 'MAX(contribution.receive_date) AS last'],
+      ['contribution', 'membership'],
+      FALSE
+    );
+    $this->assertSame([
+      'COUNT(DISTINCT contribution.id) AS n',
+      'COUNT(DISTINCT id) AS people',
+      'GROUP_CONCAT(DISTINCT membership.membership_type_id:label) AS types',
+      'MAX(contribution.receive_date) AS last',
+    ], $select);
+    $this->assertSame([], $issues);
+  }
+
+  public function testGuardFanOutDropsSums(): void {
+    [$select, $issues] = QueryNormalizer::guardFanOutAggregates(
+      ['display_name', 'SUM(contribution.total_amount) AS total', 'AVG(contribution.total_amount) AS avg'],
+      ['contribution', 'membership'],
+      TRUE
+    );
+    $this->assertSame(['display_name', 'AVG(contribution.total_amount) AS avg'], $select);
+    $this->assertCount(1, $issues);
+    $this->assertStringContainsString("'total'", $issues[0]);
+    $this->assertStringContainsString('membership', $issues[0]);
+  }
+
+  public function testGuardFanOutDropsAvgAcrossRecordsAndBaseSums(): void {
+    [$select, $issues] = QueryNormalizer::guardFanOutAggregates(
+      ['AVG(contribution.total_amount) AS avg', 'SUM(total_amount) AS total'],
+      ['contribution', 'membership'],
+      FALSE
+    );
+    $this->assertSame([], $select);
+    $this->assertCount(2, $issues);
+  }
+
 }

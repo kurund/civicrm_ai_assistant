@@ -209,6 +209,90 @@ class QueryNormalizer {
   }
 
   /**
+   * Can a normalized join match several rows per base row? Only a link onto
+   * the joined entity's id (base.contact_id = contact.id) is many-to-one;
+   * links back to the base (base.id = membership.contact_id) fan out, and
+   * EXCLUDE never adds rows.
+   */
+  public static function isFanOutJoin(array $join): bool {
+    if ($join[1] === 'EXCLUDE') {
+      return FALSE;
+    }
+    [, $alias] = self::joinEntityAlias($join);
+    foreach (array_slice($join, 2) as $cond) {
+      if (($cond[1] ?? '') !== '=' || ($cond[3] ?? TRUE) === FALSE || !self::isFieldOperand($cond[2] ?? NULL)) {
+        continue;
+      }
+      foreach ([[$cond[0], $cond[2]], [$cond[2], $cond[0]]] as [$own, $other]) {
+        if ($own === "{$alias}.id" && !str_starts_with($other, "{$alias}.")) {
+          return FALSE;
+        }
+      }
+    }
+    return TRUE;
+  }
+
+  /**
+   * Fix or remove aggregates that fan-out joins would inflate. Each row of the
+   * aggregated entity is repeated once per match in every OTHER fan-out join,
+   * so a total over contributions joined with memberships double-counts a
+   * contact who has two memberships. Pure.
+   *
+   * - COUNT of rows/ids becomes COUNT(DISTINCT ...) (exact);
+   * - GROUP_CONCAT gains DISTINCT; MIN/MAX are unaffected;
+   * - AVG is exact when grouped by the base id (every value repeats equally);
+   * - anything else (SUM, AVG across records, ...) cannot be expressed exactly
+   *   in APIv4 and is dropped with an issue rather than shown wrong.
+   *
+   * @param string[] $select
+   * @param string[] $fanOutAliases  Aliases of the fan-out joins.
+   * @param bool $groupedById  groupBy includes the base "id".
+   * @return array{0: string[], 1: string[]}  [select, issues]
+   */
+  public static function guardFanOutAggregates(array $select, array $fanOutAliases, bool $groupedById): array {
+    $kept = [];
+    $issues = [];
+    foreach ($select as $item) {
+      if (!self::isAggregate($item) || !$fanOutAliases) {
+        $kept[] = $item;
+        continue;
+      }
+      $alias = self::selectAlias($item);
+      $expr = self::stripAlias($item);
+      preg_match('/^([A-Za-z_]+)\s*\(\s*(DISTINCT\s+)?(.*?)\s*\)$/is', $expr, $m);
+      $fn = strtoupper($m[1] ?? '');
+      $distinct = !empty($m[2]);
+      $arg = $m[3] ?? '';
+
+      $source = preg_match('/^([A-Za-z0-9_]+)\./', $arg, $s) ? $s[1] : '';
+      $multipliers = array_values(array_diff($fanOutAliases, [$source]));
+      if (!$multipliers || in_array($fn, ['MIN', 'MAX'], TRUE)) {
+        $kept[] = $item;
+        continue;
+      }
+
+      $suffix = $alias !== NULL ? " AS {$alias}" : '';
+      if ($fn === 'COUNT' && !$distinct && ($arg === '*' || $arg === 'id' || $arg === "{$source}.id")) {
+        $kept[] = 'COUNT(DISTINCT ' . ($arg === '*' ? 'id' : $arg) . ')' . $suffix;
+      }
+      elseif ($distinct && in_array($fn, ['COUNT', 'GROUP_CONCAT'], TRUE)) {
+        $kept[] = $item;
+      }
+      elseif ($fn === 'GROUP_CONCAT' && $arg !== '') {
+        $kept[] = "GROUP_CONCAT(DISTINCT {$arg}){$suffix}";
+      }
+      elseif ($fn === 'AVG' && !$distinct && $groupedById) {
+        $kept[] = $item;
+      }
+      else {
+        $issues[] = "Removed '" . self::selectResultKey($item) . "': it would be multiplied by the joined "
+          . implode(', ', $multipliers) . " records. Ask for it in a separate search.";
+      }
+    }
+    return [$kept, $issues];
+  }
+
+  /**
    * Coerce orderBy into APIv4's {field: direction} object form. Models often
    * emit SQL/SearchKit-style [[field, dir], ...] or ["field"] instead.
    */
