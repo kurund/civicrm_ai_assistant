@@ -13,6 +13,8 @@
       $refine = $("#ai-refine"),
       $refineRun = $("#ai-refine-run"),
       $save = $("#ai-save"),
+      $actions = $("#ai-actions"),
+      $print = $("#ai-print"),
       $json = $("#ai-json");
 
     // Transient draft state — never written to the database here. The entity is
@@ -30,6 +32,7 @@
       $results.empty();
       $summary.empty();
       $refineWrap.hide();
+      $actions.hide();
       $json.hide();
     }
 
@@ -112,6 +115,7 @@
         }
       }
       $results.html(html);
+      $actions.show();
       $refineWrap.show();
       $save.show();
     }
@@ -172,6 +176,10 @@
         e.preventDefault();
         $refineRun.click();
       }
+    });
+
+    $print.on("click", function () {
+      window.print();
     });
 
     // Save the current transient draft as a real SearchKit SavedSearch.

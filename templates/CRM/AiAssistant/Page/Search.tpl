@@ -4,7 +4,7 @@
 <div class="crm-block crm-content-block" id="ai-search-app">
 
   <div class="help">
-    {ts escape='html'}Describe what you want in plain language — e.g. "lapsed donors in the United Kingdom who gave over £100 last year". The assistant builds a query, picks how to show it, and previews the result. Nothing is saved unless you choose to.{/ts}
+    {ts escape='html'}Describe what you want in plain language - e.g. "lapsed donors in the United Kingdom who gave over £100 last year". The assistant builds a query, picks how to show it, and previews the result. Nothing is saved unless you choose to.{/ts}
   </div>
 
   <div class="ai-search-bar">
@@ -15,16 +15,22 @@
     <span id="ai-status" class="ai-status"></span>
   </div>
 
-  <div id="ai-summary" class="ai-summary"></div>
+  <div id="ai-actions" class="ai-actions" style="display:none;">
+    <button id="ai-print" class="crm-button">{ts}Print{/ts}</button>
+  </div>
 
-  <div id="ai-results" class="ai-results"></div>
+  <div id="ai-print-area">
+    <div id="ai-summary" class="ai-summary"></div>
+
+    <div id="ai-results" class="ai-results"></div>
+  </div>
 
   <div id="ai-refine-wrap" class="ai-refine-wrap" style="display:none;">
     <label for="ai-refine">{ts}Refine{/ts}</label>
     <textarea id="ai-refine" class="crm-form-textarea" rows="1"
       placeholder="{ts escape='html'}e.g. only include this year, add their email, sort by amount…{/ts}"></textarea>
     <button id="ai-refine-run" class="crm-button">{ts}Refine{/ts}</button>
-    <button id="ai-save" class="crm-button" style="display:none;">{ts}Save as SearchKit{/ts}</button>
+    <!--button id="ai-save" class="crm-button" style="display:none;">{ts}Save as SearchKit{/ts}</button-->
   </div>
 
   <details id="ai-json" class="ai-json" style="display:none;">

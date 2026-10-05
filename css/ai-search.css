@@ -88,3 +88,42 @@
   padding: 10px;
   overflow-x: auto;
 }
+#ai-search-app .ai-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media print {
+  /* visibility (not display) so the print area survives inside hidden CMS/theme wrappers */
+  body * {
+    visibility: hidden;
+  }
+  #ai-print-area,
+  #ai-print-area * {
+    visibility: visible;
+  }
+  #ai-print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  #ai-search-app .ai-results {
+    overflow: visible;
+  }
+  #ai-search-app table.ai-table {
+    font-size: 10pt;
+  }
+  #ai-search-app table.ai-table thead {
+    display: table-header-group;
+  }
+  #ai-search-app table.ai-table tr {
+    break-inside: avoid;
+  }
+  #ai-search-app table.ai-table thead th,
+  #ai-search-app .ai-entity-badge {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
