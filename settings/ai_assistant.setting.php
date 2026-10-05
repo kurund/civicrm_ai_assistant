@@ -106,7 +106,7 @@ return [
     'name' => 'ai_max_tokens',
     'type' => 'Integer',
     'html_type' => 'number',
-    'default' => 1024,
+    'default' => 2048,
     'title' => E::ts('Max response tokens'),
     'description' => E::ts('Upper bound on tokens the model may generate per call. Raise it if generated queries look truncated (common with local models, whose default output budget is small); lower it to cap cost.'),
     'help_text' => NULL,

@@ -35,7 +35,7 @@ Privacy & PII, and Limits sections. Or set values via the `Setting` API:
 | `ai_redact_pii`        | `TRUE`                         |
 | `ai_log_prompts`       | `FALSE`                        |
 | `ai_preview_limit`     | `25`                           |
-| `ai_max_tokens`        | `1024`                         |
+| `ai_max_tokens`        | `2048`                         |
 
 ## PII posture (read this)
 

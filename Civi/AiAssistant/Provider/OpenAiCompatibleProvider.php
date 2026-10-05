@@ -16,7 +16,7 @@ class OpenAiCompatibleProvider implements ProviderInterface {
     $modelSetting = $options['model'] ?? (string) \Civi::settings()->get('ai_model');
     $apiKey = (string) \Civi::settings()->get('ai_api_key');
     $timeout = (int) (\Civi::settings()->get('ai_request_timeout') ?: 60);
-    $maxTokens = (int) ($options['max_tokens'] ?? (\Civi::settings()->get('ai_max_tokens') ?: 1024));
+    $maxTokens = (int) ($options['max_tokens'] ?? (\Civi::settings()->get('ai_max_tokens') ?: 2048));
 
     if ($baseUrl === '' || trim($modelSetting) === '') {
       throw new \CRM_Core_Exception('AI Assistant is not configured: set the provider base URL and model.');
