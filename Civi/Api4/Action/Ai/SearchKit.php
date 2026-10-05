@@ -124,6 +124,7 @@ class SearchKit extends AbstractAction {
 
   private function buildSystemPrompt(string $entity): string {
     $schema = SchemaContext::asPromptBlock($entity);
+    $joinable = implode(', ', array_diff(SchemaContext::$allowedEntities, [$entity]));
     $current = '';
     if (!empty($this->apiParams)) {
       $current = "\n\nThe user is REFINING this existing api_params (edit it, don't start over):\n"
@@ -145,16 +146,25 @@ Return ONLY a JSON object with these keys:
 APIv4 syntax rules — follow precisely:
 - "select": array of strings. ONLY function expressions may use "AS alias" — e.g. "COUNT(id) AS cnt", "SUM(total_amount) AS total". NEVER alias a plain field: write "contact_id.display_name", NOT "contact_id.display_name AS donor". When you use an aggregate, every non-aggregated selected field must also appear in groupBy.
 - An alias must NOT be the same as an existing field name. For SUM(total_amount) write "SUM(total_amount) AS total" (or "AS total_sum"), NEVER "AS total_amount".
-- To read a field on a RELATED entity, use the foreign-key field, a dot, then the field: e.g. "contact_id.display_name", NOT "contact.display_name". Only use joins you are confident exist.
+- To read a field on a RELATED entity, use the foreign-key field, a dot, then the field: e.g. "contact_id.display_name", NOT "contact.display_name".
 - A contact's email/phone/address are SEPARATE related records, not plain fields. Read the primary one via an implicit join: "contact_id.email_primary.email", "contact_id.phone_primary.phone", "contact_id.address_primary.street_address". There is NO "contact_id.email" or "contact_id.phone" field. (When the base entity IS Contact, drop the "contact_id." prefix: "email_primary.email".)
 - In "display".columns and "orderBy", reference a plain field by its full path (e.g. "contact_id.display_name") and an aggregate by its alias (e.g. "total").
 - "where": array of [field, operator, value]. Operators: "=", "!=", ">", "<", ">=", "<=", "IN", "NOT IN", "LIKE", "IS NULL", "IS NOT NULL", "BETWEEN". For IS NULL / IS NOT NULL omit the value: [field, "IS NOT NULL"]. For BETWEEN and IN the value is a SINGLE array: ["receive_date", "BETWEEN", ["2026-01-01", "2026-12-31"]], ["status_id", "IN", [1, 2]] — NOT [field, "BETWEEN", lo, hi].
 - "orderBy": an OBJECT mapping a field or select-alias to "ASC" or "DESC". CORRECT: {"total": "DESC"}. WRONG: [["total","DESC"]].
 - "groupBy": array of field names (no aliases).
 - "limit": integer.
-- Use ONLY field names from the list below (plus implicit-join paths described above). Do not invent fields.
+- Use ONLY field names from the list below (plus implicit-join paths described above and fields of entities you join). Do not invent fields.
+
+Explicit joins — use when the request combines records of ANOTHER entity that points back at this one (e.g. contacts who have a membership AND a contribution):
+- "join": array of ["Entity AS alias", "INNER"|"LEFT"|"EXCLUDE", [left, "=", right]]. INNER = must have a matching record, EXCLUDE = must NOT have one, LEFT = optional (to show its fields).
+- Joinable entities: {$joinable}.
+- The ON condition links the two by field names, e.g. ["id", "=", "membership.contact_id"] from Contact, or ["contact_id", "=", "membership.contact_id"] from Contribution.
+- Refer to a joined entity's fields with the alias prefix: "membership.membership_type_id:label", "membership.status_id:name". Put filters on joined fields in "where", not in the ON condition.
+- Joins repeat the base row once per match, so the result is grouped by the base "id" automatically. Never SUM/COUNT one joined entity while also INNER-joining a different one-to-many entity (the totals get multiplied); use COUNT(DISTINCT alias.id) for counts.
 
 Example (top contributors): {"select":["contact_id.display_name AS donor","SUM(total_amount) AS total"],"groupBy":["contact_id"],"orderBy":{"total":"DESC"},"limit":10}
+
+Example (Contact: donors who are also current members): {"select":["display_name","email_primary.email","membership.membership_type_id:label"],"join":[["Contribution AS contribution","INNER",["id","=","contribution.contact_id"]],["Membership AS membership","INNER",["id","=","membership.contact_id"]]],"where":[["contribution.contribution_status_id:name","=","Completed"],["membership.status_id:name","IN",["New","Current","Grace"]]]}
 
 Display intent rules:
 - Counting / totals / averages / "how many" / "total" -> "single" with a single aggregate in select (e.g. "COUNT(id) AS total"); returns one row/one value.
@@ -210,6 +220,7 @@ TXT;
     $system = "You route a CiviCRM search request to the single entity whose own records best answer it. "
       . "The request may contain typos, abbreviations or informal wording — infer intent. "
       . "Prefer Contact unless the request is fundamentally about another entity's records or aggregates. "
+      . "A request that combines several record types about the same people (e.g. donors who are also members) is about Contact. "
       . "Reply with ONLY JSON: {\"entity\": \"<one of: {$list}>\"}.\n\nEntities:\n{$catalog}";
     try {
       $decoded = $llm->completeJson($system, [['role' => 'user', 'content' => $prompt]], ['temperature' => 0]);

@@ -122,6 +122,89 @@ class QueryNormalizer {
   }
 
   /**
+   * Repair one explicit join into APIv4's
+   * ["Entity AS alias", "INNER"|"LEFT"|"EXCLUDE", [a, op, b], ...] form, or
+   * NULL if it is unusable. Shape only; fields are checked by the validator.
+   * Pure.
+   *
+   * Accepts the common model variants: an object
+   * ({entity, alias, type, on}), a lowercase or SQL-ish side ("inner join"),
+   * a missing side, and a single flat condition ([..., "id", "=", "m.contact_id"]).
+   */
+  public static function normalizeJoin($join): ?array {
+    if (!is_array($join)) {
+      return NULL;
+    }
+    if (isset($join['entity'])) {
+      $alias = $join['alias'] ?? NULL;
+      $on = $join['on'] ?? $join['conditions'] ?? [];
+      $on = (is_array($on) && isset($on[0]) && !is_array($on[0])) ? [$on] : (array) $on;
+      $join = array_merge(
+        [$join['entity'] . ($alias ? ' AS ' . $alias : ''), $join['type'] ?? $join['side'] ?? 'LEFT'],
+        $on
+      );
+    }
+    $join = array_values($join);
+    if (!isset($join[0]) || !is_string($join[0])) {
+      return NULL;
+    }
+    if (!preg_match('/^\s*([A-Za-z][A-Za-z0-9_]*)(?:\s+AS\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/i', $join[0], $m)) {
+      return NULL;
+    }
+    $entity = $m[1];
+    $alias = ($m[2] ?? '') !== '' ? $m[2] : strtolower($entity);
+
+    $rest = array_slice($join, 1);
+    $side = 'LEFT';
+    if ($rest && !is_array($rest[0])) {
+      $raw = array_shift($rest);
+      if (is_bool($raw)) {
+        $side = $raw ? 'INNER' : 'LEFT';
+      }
+      else {
+        $raw = strtoupper(trim(preg_replace('/\s+(OUTER\s+)?JOIN$/i', '', trim((string) $raw))));
+        if (!in_array($raw, ['INNER', 'LEFT', 'EXCLUDE'], TRUE)) {
+          return NULL;
+        }
+        $side = $raw;
+      }
+    }
+
+    // A single flat condition: [..., "id", "=", "m.contact_id"].
+    if (count($rest) === 3 && !is_array($rest[0]) && !is_array($rest[1])) {
+      $rest = [$rest];
+    }
+    $conditions = [];
+    foreach ($rest as $cond) {
+      if (!is_array($cond) || count($cond) < 3 || !is_string($cond[0])) {
+        return NULL;
+      }
+      $cond = array_values($cond);
+      $conditions[] = [$cond[0], strtoupper(trim((string) $cond[1])), $cond[2]];
+    }
+    if (!$conditions) {
+      return NULL;
+    }
+    return array_merge(["{$entity} AS {$alias}", $side], $conditions);
+  }
+
+  /**
+   * [entity, alias] of a normalized join.
+   */
+  public static function joinEntityAlias(array $join): array {
+    [$entity, $alias] = array_map('trim', explode(' AS ', $join[0], 2));
+    return [$entity, $alias];
+  }
+
+  /**
+   * Is a join ON operand a field reference (vs. a quoted literal or number)?
+   * APIv4 treats unquoted ON operands as field names.
+   */
+  public static function isFieldOperand($operand): bool {
+    return is_string($operand) && (bool) preg_match('/^[A-Za-z_][A-Za-z0-9_.:]*$/', $operand);
+  }
+
+  /**
    * Coerce orderBy into APIv4's {field: direction} object form. Models often
    * emit SQL/SearchKit-style [[field, dir], ...] or ["field"] instead.
    */
@@ -189,12 +272,14 @@ class QueryNormalizer {
    * The plain fields that MUST appear in groupBy for a given select: when the
    * select contains an aggregate, every non-aggregated plain field has to be
    * grouped. Pseudoconstant suffixes are stripped (group by the raw field).
-   * Returns [] when there is no aggregate (no grouping required). Pure.
+   * Returns [] when there is no aggregate and the query is not already grouped
+   * (no grouping required). Pure.
    *
    * @param string[] $select
+   * @param bool $grouped  The query already has a groupBy.
    * @return string[]
    */
-  public static function requiredGroupBy(array $select): array {
+  public static function requiredGroupBy(array $select, bool $grouped = FALSE): array {
     $hasAggregate = FALSE;
     $fields = [];
     foreach ($select as $item) {
@@ -211,7 +296,7 @@ class QueryNormalizer {
         $fields[] = $field;
       }
     }
-    return $hasAggregate ? array_values(array_unique($fields)) : [];
+    return ($hasAggregate || $grouped) ? array_values(array_unique($fields)) : [];
   }
 
   /**

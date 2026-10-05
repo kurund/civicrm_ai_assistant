@@ -168,4 +168,52 @@ class QueryNormalizerTest extends TestCase {
     $this->assertSame('Total', QueryNormalizer::prettifyLabel('total'));
   }
 
+  public function testRequiredGroupByWhenAlreadyGrouped(): void {
+    $this->assertSame(
+      ['display_name', 'membership.membership_type_id'],
+      QueryNormalizer::requiredGroupBy(['display_name', 'membership.membership_type_id:label'], TRUE)
+    );
+  }
+
+  public function testNormalizeJoinKeepsCanonicalForm(): void {
+    $join = ['Membership AS membership', 'INNER', ['id', '=', 'membership.contact_id']];
+    $this->assertSame($join, QueryNormalizer::normalizeJoin($join));
+  }
+
+  public function testNormalizeJoinRepairsSideAndAlias(): void {
+    $this->assertSame(
+      ['Membership AS membership', 'INNER', ['id', '=', 'membership.contact_id']],
+      QueryNormalizer::normalizeJoin(['Membership', 'inner join', ['id', '=', 'membership.contact_id']])
+    );
+    $this->assertSame(
+      ['Membership AS m', 'LEFT', ['id', '=', 'm.contact_id']],
+      QueryNormalizer::normalizeJoin(['Membership AS m', ['id', '=', 'm.contact_id']])
+    );
+  }
+
+  public function testNormalizeJoinAcceptsFlatConditionAndObjectForm(): void {
+    $expected = ['Contribution AS c', 'EXCLUDE', ['id', '=', 'c.contact_id']];
+    $this->assertSame($expected, QueryNormalizer::normalizeJoin(['Contribution AS c', 'EXCLUDE', 'id', '=', 'c.contact_id']));
+    $this->assertSame($expected, QueryNormalizer::normalizeJoin([
+      'entity' => 'Contribution',
+      'alias' => 'c',
+      'type' => 'exclude',
+      'on' => ['id', '=', 'c.contact_id'],
+    ]));
+  }
+
+  public function testNormalizeJoinRejectsUnusable(): void {
+    $this->assertNull(QueryNormalizer::normalizeJoin(['Membership AS m', 'INNER']));
+    $this->assertNull(QueryNormalizer::normalizeJoin(['Membership AS m', 'RIGHT', ['id', '=', 'm.contact_id']]));
+    $this->assertNull(QueryNormalizer::normalizeJoin(['civicrm_membership; DROP', 'INNER', ['id', '=', 'x']]));
+    $this->assertNull(QueryNormalizer::normalizeJoin('Membership'));
+  }
+
+  public function testIsFieldOperand(): void {
+    $this->assertTrue(QueryNormalizer::isFieldOperand('membership.status_id:name'));
+    $this->assertFalse(QueryNormalizer::isFieldOperand("'Current'"));
+    $this->assertFalse(QueryNormalizer::isFieldOperand('5'));
+    $this->assertFalse(QueryNormalizer::isFieldOperand(5));
+  }
+
 }

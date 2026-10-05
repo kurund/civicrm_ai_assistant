@@ -8,8 +8,9 @@ namespace Civi\AiAssistant;
  * hallucinated column can't fail (or worse, silently distort) the query.
  *
  * This is the deterministic backstop: the model proposes, CiviCRM's own
- * metadata disposes. Resolves one-level implicit joins via each field's
- * fk_entity, and tolerates `field:label` pseudoconstant suffixes.
+ * metadata disposes. Resolves implicit joins via each field's fk_entity,
+ * explicit-join aliases ("membership.status_id"), and tolerates `field:label`
+ * pseudoconstant suffixes.
  */
 class QueryValidator {
 
@@ -39,13 +40,19 @@ class QueryValidator {
 
   /**
    * Does a (possibly dotted, possibly :suffixed) field path exist on $entity?
-   * Implicit joins are resolved one segment at a time via fk_entity.
+   * Implicit joins are resolved one segment at a time via fk_entity; a first
+   * segment naming an explicit join alias resolves against that join's entity.
+   *
+   * @param array<string,string> $joins  Explicit join alias => entity.
    */
-  public static function fieldExists(string $entity, string $path): bool {
+  public static function fieldExists(string $entity, string $path, array $joins = []): bool {
     $segments = explode('.', $path);
     $first = self::stripSuffix($segments[0]);
     if ($first === '') {
       return FALSE;
+    }
+    if (count($segments) > 1 && isset($joins[$segments[0]])) {
+      return self::fieldExists($joins[$segments[0]], implode('.', array_slice($segments, 1)));
     }
     $names = self::fieldNames($entity);
     if (!$names) {
@@ -86,6 +93,64 @@ class QueryValidator {
   }
 
   /**
+   * Repair and check explicit joins: the joined entity must be one the assistant
+   * may query, the alias must not shadow a base field, and every field in the ON
+   * conditions must exist. A join that fails any check is dropped (fields that
+   * reference its alias are then dropped by the regular field checks).
+   *
+   * @return array{0: array[], 1: array<string,string>, 2: string[]}
+   *   [valid joins, alias => entity, issues]
+   */
+  private static function validateJoins(string $entity, $rawJoins): array {
+    $joins = [];
+    $aliases = [];
+    $issues = [];
+    $names = self::fieldNames($entity);
+    foreach ((is_array($rawJoins) ? $rawJoins : []) as $raw) {
+      $join = QueryNormalizer::normalizeJoin($raw);
+      if ($join === NULL) {
+        $issues[] = 'Dropped malformed join';
+        continue;
+      }
+      [$joinEntity, $alias] = QueryNormalizer::joinEntityAlias($join);
+      if (!SchemaContext::isAllowed($joinEntity) || !self::fieldNames($joinEntity)) {
+        $issues[] = "Dropped join on entity not permitted for AI search: {$joinEntity}";
+        continue;
+      }
+      if (isset($names[$alias]) || isset($aliases[$alias])) {
+        $issues[] = "Dropped join with conflicting alias: {$alias}";
+        continue;
+      }
+      $known = $aliases + [$alias => $joinEntity];
+      $linksJoin = FALSE;
+      $valid = TRUE;
+      foreach (array_slice($join, 2) as $cond) {
+        if (!in_array($cond[1], QueryNormalizer::OPERATORS, TRUE)) {
+          $valid = FALSE;
+          break;
+        }
+        foreach ([$cond[0], $cond[2]] as $operand) {
+          if (!QueryNormalizer::isFieldOperand($operand)) {
+            continue;
+          }
+          if (!self::fieldExists($entity, $operand, $known)) {
+            $valid = FALSE;
+            break 2;
+          }
+          $linksJoin = $linksJoin || str_starts_with($operand, $alias . '.');
+        }
+      }
+      if (!$valid || !$linksJoin) {
+        $issues[] = "Dropped join with invalid ON condition: {$join[0]}";
+        continue;
+      }
+      $aliases[$alias] = $joinEntity;
+      $joins[] = $join;
+    }
+    return [$joins, $aliases, $issues];
+  }
+
+  /**
    * Validate & repair api_params. Returns ['params' => array, 'issues' => string[]].
    */
   public static function validate(string $entity, array $params): array {
@@ -97,12 +162,22 @@ class QueryValidator {
 
     $names = self::fieldNames($entity);
 
+    // JOIN — must be run before the field checks, which resolve its aliases.
+    [$joinClauses, $joins, $joinIssues] = self::validateJoins($entity, $params['join'] ?? []);
+    $issues = array_merge($issues, $joinIssues);
+    if ($joinClauses) {
+      $params['join'] = $joinClauses;
+    }
+    else {
+      unset($params['join']);
+    }
+
     // SELECT — keep "*", and any item whose underlying field resolves.
     if (!empty($params['select']) && is_array($params['select'])) {
       $kept = [];
       foreach ($params['select'] as $sel) {
         $base = QueryNormalizer::baseField($sel);
-        if ($base === '' || $base === '*' || self::fieldExists($entity, $base)) {
+        if ($base === '' || $base === '*' || self::fieldExists($entity, $base, $joins)) {
           $kept[] = $sel;
         }
         else {
@@ -153,7 +228,7 @@ class QueryValidator {
           $issues[] = "Dropped where clause with invalid operator: {$op}";
           continue;
         }
-        if (!self::fieldExists($entity, (string) $clause[0])) {
+        if (!self::fieldExists($entity, (string) $clause[0], $joins)) {
           $issues[] = "Dropped where clause on unknown field: {$clause[0]}";
           continue;
         }
@@ -171,7 +246,7 @@ class QueryValidator {
     if (!empty($params['groupBy']) && is_array($params['groupBy'])) {
       $kept = [];
       foreach ($params['groupBy'] as $g) {
-        if (self::fieldExists($entity, (string) $g)) {
+        if (self::fieldExists($entity, (string) $g, $joins)) {
           $kept[] = $g;
         }
         else {
@@ -189,7 +264,16 @@ class QueryValidator {
     // When the select aggregates, every non-aggregated selected field must be
     // grouped or MySQL errors (ONLY_FULL_GROUP_BY). Models routinely group by
     // only the "main" field (e.g. contact_id) and omit the rest — add them.
-    $required = QueryNormalizer::requiredGroupBy($params['select'] ?? []);
+    // A join onto a one-to-many entity (a contact's contributions) repeats the
+    // base row once per match; group by the base id to keep one row each.
+    $fansOut = FALSE;
+    foreach ($joinClauses as $join) {
+      $fansOut = $fansOut || $join[1] !== 'EXCLUDE';
+    }
+    if ($fansOut && empty($params['groupBy'])) {
+      $params['groupBy'] = ['id'];
+    }
+    $required = QueryNormalizer::requiredGroupBy($params['select'] ?? [], !empty($params['groupBy']));
     if ($required) {
       $existing = $params['groupBy'] ?? [];
       $params['groupBy'] = array_values(array_unique(array_merge($existing, $required)));
@@ -205,7 +289,7 @@ class QueryValidator {
         if (isset($aliasExpr[$field])) {
           $kept[$aliasExpr[$field]] = $dir;
         }
-        elseif (isset($aliases[$field]) || self::fieldExists($entity, (string) $field)) {
+        elseif (isset($aliases[$field]) || self::fieldExists($entity, (string) $field, $joins)) {
           $kept[$field] = $dir;
         }
         else {
